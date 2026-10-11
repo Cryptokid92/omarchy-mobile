@@ -28,6 +28,8 @@ Usage: omandroid <command>
   fastboot         Get the phone into fastboot without buttons (adb, reboot-to,
                    or crash until ABL falls back to stock Android on slot A)
   flash            Flash the experiment images to slot B and boot them
+  push             Write the images into slot B from the running phone over SSH,
+                   verify them, and reboot into them (no fastboot)
   kernel-shell     Open a shell in the build environment, in the kernel tree
 USAGE
 }
@@ -254,6 +256,32 @@ cmd_flash() {
   die "no SSH after boot (the safety net returns to fastboot within about a minute)"
 }
 
+cmd_push() {
+  local img="$KERNEL_OUT/images" ssh="$ROOT/tools/phone-ssh" p dev want got
+  "$ssh" true || die "phone not reachable at 172.16.42.1"
+  for p in boot init_boot vendor_boot vendor_kernel_boot dtbo; do
+    [[ -f "$img/$p.img" ]] || die "missing $img/$p.img (run: omandroid images)"
+    # Find the partition by GPT name; the init guard leaves only these writable
+    dev=$("$ssh" "for s in /sys/block/sda/sda*; do grep -qx 'PARTNAME=${p}_b' \$s/uevent && echo /dev/\${s##*/}; done")
+    [[ -n "$dev" ]] || die "${p}_b not found on the phone"
+    [[ "$("$ssh" "cat /sys/block/sda/${dev#/dev/}/ro")" == 0 ]] || die "$dev (${p}_b) is read-only; refusing"
+    "$ssh" "dd of=$dev bs=1M conv=fsync 2>/dev/null" < "$img/$p.img"
+    want=$(sha256sum < "$img/$p.img" | cut -d' ' -f1)
+    got=$("$ssh" "head -c $(stat -c %s "$img/$p.img") $dev | sha256sum" | cut -d' ' -f1)
+    [[ "$want" == "$got" ]] || die "verify failed for ${p}_b ($dev)"
+    say "${p}_b ($dev) written and verified"
+  done
+  say "Rebooting into the new images"
+  "$ssh" 'sync; (sleep 1; /usr/local/bin/reboot-to omandroid) >/dev/null 2>&1 &' || true
+  sleep 15
+  local i
+  for i in $(seq 1 45); do
+    "$ssh" 'uname -v; cut -d" " -f1 /proc/uptime' 2>/dev/null && return 0
+    sleep 2
+  done
+  die "no SSH after reboot (the safety net crashes back to slot A within about a minute)"
+}
+
 cmd_kernel_shell() {
   in_container "exec bash"
 }
@@ -266,6 +294,7 @@ case "${1:-}" in
   kexec) cmd_kexec ;;
   fastboot) cmd_fastboot ;;
   flash) cmd_flash ;;
+  push) cmd_push ;;
   kernel-shell) cmd_kernel_shell ;;
   *) usage ;;
 esac

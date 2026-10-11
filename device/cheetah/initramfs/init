@@ -20,23 +20,42 @@ mount -t tmpfs tmpfs /run
 # it runs: do one pass now, then keep a watcher running for the life of PID 1.
 # Nothing in this initramfs runs mdev/udev, so no one else touches the disks.
 ufs_ro_log() { echo "omandroid: ufs-ro: $*" > /dev/kmsg; }
-# Each disk and each partition gets its own read-only flag (a partition's
-# sysfs "ro" already reads 1 once its disk is ro, so track what was done in
-# /run/ufs-ro instead). Uses only shell builtins when there is nothing to do,
-# so the watcher costs next to nothing.
+# Storage guard. Everything on the UFS is read-only except an allowlist of
+# partitions we own: slot B's boot images (in-place kernel updates) and
+# userdata (the Arch root). The kernel only lets a partition be written if
+# its whole disk is writable too, so the main disk (sda) stays writable but
+# its whole-disk node is removed, so nothing can write across partitions by
+# accident. The boot LUNs (sdb, sdc, sdd: bootloader images) are read-only
+# at the disk level. Calibration partitions (efs, persist, modem_userdata...)
+# and all of slot A stay read-only.
+UFS_RW="boot_b init_boot_b vendor_boot_b vendor_kernel_boot_b dtbo_b userdata"
 mkdir -p /run/ufs-ro
+ufs_partname() { sed -n 's/^PARTNAME=//p' "$1/uevent" 2>/dev/null; }
 ufs_ro_pass() {
-  local s ro name
+  local s ro name part disk
   for s in /sys/block/sd* /sys/block/sd*/sd*; do
     [ -r "$s/ro" ] || continue
     name=${s##*/}
     [ -e "/run/ufs-ro/$name" ] && continue
     [ -b "/dev/$name" ] || continue  # devtmpfs node not there yet: next pass
+    if [ "$name" = sda ]; then
+      rm -f /dev/sda
+      : > "/run/ufs-ro/$name"
+      ufs_ro_log "/dev/sda: whole-disk node removed (partitions guarded individually)"
+      continue
+    fi
+    part=$(ufs_partname "$s")
+    if [ -n "$part" ] && [ "${name%%[0-9]*}" = sda ] && \
+       case " $UFS_RW " in *" $part "*) true ;; *) false ;; esac; then
+      : > "/run/ufs-ro/$name"
+      ufs_ro_log "/dev/$name ($part) left writable (allowlist)"
+      continue
+    fi
     blockdev --setro "/dev/$name"
     read -r ro < "$s/ro"
     if [ "$ro" = 1 ]; then
       : > "/run/ufs-ro/$name"
-      ufs_ro_log "/dev/$name set read-only"
+      ufs_ro_log "/dev/$name${part:+ ($part)} set read-only"
     elif [ ! -e "/run/ufs-ro/$name.failed" ]; then
       : > "/run/ufs-ro/$name.failed"  # keep retrying, but log once
       ufs_ro_log "FAILED to set /dev/$name read-only"
