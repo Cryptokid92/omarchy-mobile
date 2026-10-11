@@ -28,5 +28,5 @@ Large trees live outside the repo, under `~/android/`:
 ## Ground rules
 
 - We only ever flash the boot images and userdata. Never `bootloader`, `radio`, `devinfo`, `persist` or calibration partitions.
-- Every file we write carries an SPDX header: GPL-2.0 for kernel code, MIT for the rest.
+- Every file we write carries an SPDX header: GPL-2.0 for kernel code, MIT for the rest. Ports of Google's Apache-2.0 code keep that license and Google's notice (`tools/omandroid-bootctl.c`).
 - No code from unlicensed sources. Google's GPL kernel, upstream Linux, postmarketOS and Mesa are fine.

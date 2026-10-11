@@ -2,6 +2,13 @@
 
 Findings from real hardware, newest first. `BRINGUP-M1.md` is the research map written before first boot.
 
+## 2026-10-11: A/B slot metadata lives in `devinfo`
+
+- **ABL keeps the slot state in the first 128 bytes of `devinfo`** (8 KiB, not slotted), not in `misc` and not in GPT attributes. Source: Google's boot HAL, `device/google/gs-common` `bootctrl/aidl/` (Apache-2.0, tag android-14.0.0_r75), the one that builds `android.hardware.boot-service.default-pixel`. It uses GPT attributes only if devinfo is invalid. `misc` holds only the bootloader message and, at 32 KiB, the virtual A/B merge status.
+- **Layout:** magic `DEVI` (0x49564544), version u16 3 . u16 15, then 4 bytes per slot at 0x30 (a) and 0x34 (b): retry count, then flags bit0 unbootable, bit1 successful, bit2 active, bit3 fastboot-ok. No CRC. Every other header byte is ABL's own; bytes from 0x80 hold factory records (serials, IMEI).
+- **The 11 October backup decodes exactly to `getvar all`:** a: active, successful, retry 2, fastboot-ok. b: successful, unbootable, retry 2.
+- **`omandroid-bootctl`** (in the initramfs, not called by init yet) dumps it and can `mark-successful` / `set-active` behind `--i-understand`. On the backup, `set-active b` then `mark-successful b` changes only 0x31, 0x34 and 0x35. The HAL's `set-active` also writes the UFS `bBootLunEn` attribute, which the tool does not do.
+
 ## 2026-10-11: lost USB for an hour (our bug, not hardware)
 
 - **Symptom:** USB enumerated, then bulk transfers stalled after a few seconds ("transmit queue timed out" on the host, then "not responding to setup address" on re-enumeration). Background jobs with `sleep` never finished.
