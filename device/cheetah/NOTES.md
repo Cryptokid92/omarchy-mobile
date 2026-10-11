@@ -75,4 +75,4 @@ Made on the development laptop to give the phone internet over USB. Revert when 
   - The launcher reads Omarchy's default agent (`~/.config/omarchy/defaults/agent`, set by `omarchy-default-agent`). It prompts through `omarchy-agent-prompt`, or opens Omarchy's picker (`omarchy menu summon setup.default.agent`) when none is chosen.
   - `omandroid-setup-user` marks `welcome-keybindings-not-applicable`, which the proposed upstream patch in `patches/omarchy/0001-*` honours. That patch is applied on the phone as a bridge until Omarchy takes it.
   - The setup script will become Omandroid's `setup-user` entrypoint in Omarchy's lifecycle-dispatch contract once a release includes it.
-- **System locale is "C"** (Qt warns). Generate and set a UTF-8 locale in system setup.
+- **Done: UTF-8 locale and timezone** via `omandroid-setup-system` (en_US.UTF-8; timezone from the host; NTP synced).
