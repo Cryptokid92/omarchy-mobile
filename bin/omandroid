@@ -20,6 +20,11 @@ Usage: omandroid <command>
                    into $REFERENCE_DIR/<name>
   initramfs        Build the M1 initramfs (Alpine + dropbear + our init) into $KERNEL_OUT
   kernel           Build the mainline kernel ($KERNEL_DIR) with our config fragment
+  modules          Package the kernel's modules (stripped) as a tarball for the Arch
+                   root: $KERNEL_OUT/modules-<release>.tar.zst, unpacked under
+                   /usr/lib/modules on the phone
+  modules-push     Stream that tarball to the running phone, unpack it into
+                   /usr/lib/modules/<release> and run depmod (no reboot)
   images           Pack boot, init_boot, vendor_boot, vendor_kernel_boot and dtbo
                    images for the experiment slot into $KERNEL_OUT/images
   kexec            Send the freshly built kernel and initramfs to the running phone
@@ -95,6 +100,46 @@ cmd_kernel() {
   "
 }
 
+# Kernel release of the build in $KERNEL_OUT (what uname -r will print).
+kernel_release() {
+  [[ -f "$KERNEL_OUT/include/config/kernel.release" ]] || die "build the kernel first: omandroid kernel"
+  cat "$KERNEL_OUT/include/config/kernel.release"
+}
+
+cmd_modules() {
+  local rel stage="$KERNEL_OUT/modules-staging" tarball
+  rel=$(kernel_release)
+  tarball="$KERNEL_OUT/modules-$rel.tar.zst"
+  say "Installing modules for $rel into $stage (stripped)"
+  rm -rf "$stage" && mkdir -p "$stage"
+  in_container "make ARCH=arm64 LLVM=1 O=$KERNEL_OUT INSTALL_MOD_PATH=$stage INSTALL_MOD_STRIP=1 modules_install >/dev/null"
+  [[ -d "$stage/lib/modules/$rel" ]] || die "modules_install produced no lib/modules/$rel"
+  # build/source point into this machine's kernel tree; useless on the phone
+  rm -f "$stage/lib/modules/$rel/build" "$stage/lib/modules/$rel/source"
+  # Paths in the tarball are relative to /usr/lib/modules: <release>/kernel/...
+  tar -C "$stage/lib/modules" --owner=0 --group=0 --numeric-owner -cf - "$rel" | zstd -q -19 -T0 -f -o "$tarball"
+  say "$(find "$stage/lib/modules/$rel" -name '*.ko*' | wc -l) modules"
+  ls -lh "$tarball"
+}
+
+cmd_modules_push() {
+  local rel tarball ssh="$ROOT/tools/phone-ssh" running
+  rel=$(kernel_release)
+  tarball="$KERNEL_OUT/modules-$rel.tar.zst"
+  [[ -f "$tarball" ]] || die "missing $tarball (run: omandroid modules)"
+  "$ssh" true || die "phone not reachable at 172.16.42.1"
+  "$ssh" 'test -d /usr/lib/modules && command -v depmod >/dev/null' || die "phone is not in the Arch root (no /usr/lib/modules or depmod)"
+  running=$("$ssh" 'uname -r')
+  [[ "$running" == "$rel" ]] || echo "  note: phone runs $running; installing $rel for the next boot"
+  say "Unpacking modules into /usr/lib/modules/$rel on the phone"
+  # Replace the whole tree so modules dropped from the config don't linger
+  "$ssh" "set -e; rm -rf /usr/lib/modules/.$rel.new; mkdir -p /usr/lib/modules/.$rel.new
+    zstd -dc | tar -C /usr/lib/modules/.$rel.new -xf -
+    rm -rf /usr/lib/modules/$rel; mv /usr/lib/modules/.$rel.new/$rel /usr/lib/modules/$rel
+    rmdir /usr/lib/modules/.$rel.new; depmod -a $rel; sync" < "$tarball"
+  "$ssh" "find /usr/lib/modules/$rel -name '*.ko*' | wc -l; ls /usr/lib/modules/$rel/modules.dep"
+}
+
 cmd_initramfs() {
   local dl="$WORK/downloads/alpine" stage="$KERNEL_OUT/initramfs" ver=3.24.2
   local tarball="alpine-minirootfs-$ver-aarch64.tar.gz"
@@ -130,11 +175,11 @@ cmd_initramfs() {
     "$ROOT/tools/devmem.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
   "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
     -o "$stage/usr/local/bin/reboot-to" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
-    "$ROOT/tools/reboot-to.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
+    "$ROOT/packages/omandroid-device-cheetah/src/reboot-to.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
   # A/B slot metadata in devinfo (Apache-2.0 port of Google's boot HAL). Not called by init yet.
   "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
     -o "$stage/usr/local/bin/omandroid-bootctl" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
-    "$ROOT/tools/omandroid-bootctl.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
+    "$ROOT/packages/omandroid-device-cheetah/src/omandroid-bootctl.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
   mkdir -p "$stage/root/.ssh"
   cat "$HOME"/.ssh/*.pub > "$stage/root/.ssh/authorized_keys"
   chmod 700 "$stage/root/.ssh" && chmod 600 "$stage/root/.ssh/authorized_keys"
@@ -159,7 +204,8 @@ cmd_images() {
   cp "$dtb" "$img/cheetah-b0.dtb"
   "$dtc" -q -I dtb -O dts "$dtb" | sed 's/soc_id = <0x9855001 0x00>;/soc_id = <0x9855000 0x00>;/' \
     | "$dtc" -q -I dts -O dtb -o "$img/cheetah-a0.dtb" -
-  "$dtc" -q -I dtb -O dts "$img/cheetah-a0.dtb" | grep -q 'soc_id = <0x9855000' || die "soc_id rewrite failed"
+  # grep -c, not -q: with pipefail, grep -q exiting early SIGPIPEs dtc on larger trees
+  "$dtc" -q -I dtb -O dts "$img/cheetah-a0.dtb" | grep -c 'soc_id = <0x9855000' >/dev/null || die "soc_id rewrite failed"
   cat "$img/cheetah-b0.dtb" "$img/cheetah-a0.dtb" > "$img/dtb.img"
 
   say "dtbo: empty board overlay"
@@ -290,6 +336,8 @@ case "${1:-}" in
   capture) shift; cmd_capture "$@" ;;
   initramfs) cmd_initramfs ;;
   kernel) cmd_kernel ;;
+  modules) cmd_modules ;;
+  modules-push) cmd_modules_push ;;
   images) cmd_images ;;
   kexec) cmd_kexec ;;
   fastboot) cmd_fastboot ;;
