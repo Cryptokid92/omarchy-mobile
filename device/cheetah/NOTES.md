@@ -2,6 +2,15 @@
 
 Findings from real hardware, newest first. `BRINGUP-M1.md` is the research map written before first boot.
 
+## 2026-10-11: touchscreen (Synaptics S3908 on SPI)
+
+- **Works with our own driver** (`drivers/input/touchscreen/synaptics_tcm.c`, kernel branch `omandroid-touch`): TouchComm v1, message CRC off, firmware `S3908GA1B0-15.0` build 4104960, 1440x3120, 10 objects. Hyprland lists it under Touch; the panel is portrait with transform 0, so no axis swap or flip.
+- **Wiring:** PERIC1 USI0 SPI at 0x10d10000 (GIC SPI 690), mode 0, 10 MHz; CS on gpp20-3 as a GPIO; ATTN gpa7-0 (FAR_ALIVE, GIC SPI 52, level low); reset gpp23-2 (active low).
+- **ABL holds the controller in reset** (gpp23-2 driven low) but leaves both supplies (S2MPG12 LDO25M 1.8 V, LDO26M 3.3 V) on. Releasing reset by hand with devmem made ATTN fall, which proved power before any driver existed.
+- **gs201 EINT numbering skips EINT19**, so from EINT20 on the GIC SPI is the EINT number minus one (gpa7-0 = EINT53 = SPI 52; gs101 uses 53).
+- **USI IPCLK gates need `CLK_SET_RATE_PARENT`.** Without it the SPI ran from the undivided 400 MHz source and never shifted a byte (TX FIFO stuck, `I/O Error ... res-(-5)`).
+- **The controller answers 0xff when not ready**; reads are retried until the 0xa5 marker appears, as Synaptics' driver does.
+
 ## 2026-10-11: A/B slot metadata lives in `devinfo`
 
 - **ABL keeps the slot state in the first 128 bytes of `devinfo`** (8 KiB, not slotted), not in `misc` and not in GPT attributes. Source: Google's boot HAL, `device/google/gs-common` `bootctrl/aidl/` (Apache-2.0, tag android-14.0.0_r75), the one that builds `android.hardware.boot-service.default-pixel`. It uses GPT attributes only if devinfo is invalid. `misc` holds only the bootloader message and, at 32 KiB, the virtual A/B merge status.
