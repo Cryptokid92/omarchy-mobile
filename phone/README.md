@@ -23,5 +23,6 @@ Inside the window, `ALT+Return` opens a terminal.
 | Path | What it is |
 | --- | --- |
 | `profile/shell.json` | Phone layout for the shell (bar, plugins, idle) |
-| `plugins/` | Phone plugins: status bar, quick settings, launcher and agent bar, lockscreen |
+| `plugins/` | Phone plugins: status bar, quick settings, launcher and agent bar ([plugins/README.md](plugins/README.md)) |
+| `screenshots/` | The phone profile in the desktop harness |
 | `dev/` | Desktop harness: nested Hyprland config and launcher |

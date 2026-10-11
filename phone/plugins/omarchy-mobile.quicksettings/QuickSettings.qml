@@ -1,0 +1,546 @@
+// SPDX-License-Identifier: MIT
+import QtQuick
+import Quickshell
+import Quickshell.Bluetooth
+import Quickshell.Io
+import Quickshell.Networking
+import Quickshell.Services.Pipewire
+import Quickshell.Services.UPower
+import Quickshell.Wayland
+import qs.Commons
+import qs.Ui
+
+// Pull-down quick settings for the phone. The sheet drops from the top edge
+// over the status bar: a clock header, six toggle tiles, then brightness and
+// volume. Tap outside it, swipe it up, or press Escape to put it away.
+//
+// Backends are the same ones Omarchy's desktop panels drive: Quickshell's
+// NetworkManager and BlueZ services, omarchy-bluetooth-power, PipeWire, the
+// notification service's do-not-disturb, and brightnessctl for the panel
+// backlight. Tiles with no backend on this device render dimmed and do
+// nothing; see the STUB notes below.
+Item {
+  id: root
+
+  // Injected by the host.
+  property var shell: null
+  property var manifest: null
+
+  property bool opened: false
+  readonly property string pluginId: (manifest && manifest.id) || "omarchy-mobile.quicksettings"
+
+  // ---------------------------------------------------------------- lifecycle
+
+  function open(payloadJson) {
+    opened = true
+    refreshDnd()
+    brightness.refresh()
+  }
+
+  // Host-initiated close (`shell hide`).
+  function close() {
+    opened = false
+  }
+
+  // User-initiated close routes through the host so its open state stays in step.
+  function dismiss() {
+    if (shell && typeof shell.hide === "function") shell.hide(pluginId)
+    else close()
+  }
+
+  // `shell call omarchy-mobile.quicksettings state` for scripts and tests.
+  function state() {
+    return JSON.stringify({
+      opened: opened,
+      wifi: wifi.enabled,
+      bluetooth: bluetooth.enabled,
+      doNotDisturb: dnd.enabled,
+      brightness: brightness.available ? brightness.percent : null,
+      volume: audio.available ? Math.round(audio.volume * 100) : null
+    })
+  }
+
+  // `shell call omarchy-mobile.quicksettings toggleTile <name>`: the same
+  // action as tapping a tile. Returns the new state() or "unknown".
+  function toggleTile(name) {
+    var tilesByName = {
+      "wifi": wifi, "bluetooth": bluetooth, "mobile-data": mobileData,
+      "rotation-lock": rotationLock, "torch": torch, "dnd": dnd
+    }
+    var target = tilesByName[String(name || "")]
+    if (!target) return "unknown"
+    if (!target.available) return "unavailable"
+    target.toggle()
+    return state()
+  }
+
+  // ---------------------------------------------------------------- clock
+
+  SystemClock {
+    id: clock
+    precision: SystemClock.Minutes
+  }
+
+  readonly property var battery: UPower.displayDevice
+  readonly property bool hasBattery: !!battery && battery.isPresent === true
+
+  // ---------------------------------------------------------------- Wi-Fi
+
+  QtObject {
+    id: wifi
+
+    readonly property bool backendAvailable: Networking.backend === NetworkBackendType.NetworkManager
+    readonly property var devices: Networking.devices ? Networking.devices.values : []
+    readonly property var device: {
+      for (var i = 0; i < devices.length; i++)
+        if (devices[i] && devices[i].type === DeviceType.Wifi) return devices[i]
+      return null
+    }
+    readonly property var network: {
+      var networks = device && device.networks ? device.networks.values : []
+      for (var i = 0; i < networks.length; i++)
+        if (networks[i] && networks[i].connected) return networks[i]
+      return null
+    }
+    readonly property bool available: backendAvailable && !!device && Networking.wifiHardwareEnabled !== false
+    readonly property bool enabled: available && Networking.wifiEnabled
+    readonly property string status: {
+      if (!backendAvailable) return "NetworkManager not running"
+      if (!device) return "No Wi-Fi radio"
+      if (!Networking.wifiEnabled) return "Off"
+      return network ? network.name : "Not connected"
+    }
+
+    function toggle() {
+      if (available) Networking.wifiEnabled = !Networking.wifiEnabled
+    }
+  }
+
+  // ---------------------------------------------------------------- Bluetooth
+
+  QtObject {
+    id: bluetooth
+
+    readonly property var adapter: Bluetooth.defaultAdapter
+    readonly property bool available: !!adapter
+    readonly property bool enabled: available && adapter.enabled
+    property bool pending: false
+    readonly property var connected: {
+      var devices = Bluetooth.devices ? Bluetooth.devices.values : []
+      for (var i = 0; i < devices.length; i++)
+        if (devices[i] && devices[i].connected) return devices[i]
+      return null
+    }
+    readonly property string status: {
+      if (!available) return "No adapter"
+      if (pending) return enabled ? "Turning off…" : "Turning on…"
+      if (!enabled) return "Off"
+      return connected ? (connected.name || "Connected") : "On"
+    }
+
+    onEnabledChanged: pending = false
+
+    // Same path as Omarchy's Bluetooth panel: the rfkill block persists across
+    // reboots, BlueZ's Powered does not. Ask for a direction, not a toggle, so
+    // a second tap while BlueZ catches up cannot undo the first.
+    function toggle() {
+      if (!available || pending) return
+      pending = true
+      bluetoothPendingTimeout.restart()
+      Quickshell.execDetached(["omarchy-bluetooth-power", enabled ? "off" : "on"])
+    }
+  }
+
+  Timer {
+    id: bluetoothPendingTimeout
+    interval: 6000
+    onTriggered: bluetooth.pending = false
+  }
+
+  // ---------------------------------------------------------------- do not disturb
+
+  // A panel plugin gets no handle on omarchy.notifications (the host only
+  // proxies it to full bars), so read and set DND through the notification
+  // service's own IPC target on this shell instance. Quickshell.shellDir and
+  // the inherited WAYLAND_DISPLAY pin the call to this shell, never the desktop's.
+  QtObject {
+    id: dnd
+
+    property bool enabled: false
+    readonly property bool available: true
+
+    function toggle() {
+      enabled = !enabled
+      dndProc.command = ["qs", "ipc", "-p", Quickshell.shellDir, "call", "notifications", "setDnd", enabled ? "on" : "off"]
+      dndProc.running = true
+    }
+  }
+
+  function refreshDnd() {
+    if (dndProc.running) return
+    dndProc.command = ["qs", "ipc", "-p", Quickshell.shellDir, "call", "notifications", "dndState"]
+    dndProc.running = true
+  }
+
+  Process {
+    id: dndProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var value = String(text || "").trim()
+        if (value === "on" || value === "off") dnd.enabled = value === "on"
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- stubs
+
+  // STUB: mobile data. Quickshell.Networking has no modem backend and the
+  // Pixel 7 Pro's modem has no mainline driver, so there is nothing to switch.
+  // Wire this to ModemManager (mmcli / its D-Bus API) when a modem exists.
+  QtObject {
+    id: mobileData
+    readonly property bool available: false
+    readonly property bool enabled: false
+    readonly property string status: "No modem"
+    function toggle() {}
+  }
+
+  // STUB: rotation lock. Needs an accelerometer (iio-sensor-proxy) and a
+  // daemon that rotates the Hyprland output; neither exists yet, so there is
+  // no rotation to lock.
+  QtObject {
+    id: rotationLock
+    readonly property bool available: false
+    readonly property bool enabled: false
+    readonly property string status: "No sensor"
+    function toggle() {}
+  }
+
+  // STUB: torch. The rear flash LED has no mainline driver on the Pixel 7
+  // Pro. Once it appears under /sys/class/leds (a *:flash or *:torch LED),
+  // switch it with `brightnessctl -d <led> set 1|0`.
+  QtObject {
+    id: torch
+    readonly property bool available: false
+    readonly property bool enabled: false
+    readonly property string status: "No flash LED"
+    function toggle() {}
+  }
+
+  // ---------------------------------------------------------------- brightness
+
+  // The panel backlight through brightnessctl's backlight class, the device
+  // a phone actually has. No backlight (a desktop with only external
+  // monitors) leaves the row dimmed.
+  QtObject {
+    id: brightness
+
+    property bool available: false
+    property int percent: 0
+    property int pendingPercent: -1
+
+    function refresh() {
+      if (!brightnessRead.running) brightnessRead.running = true
+    }
+
+    function set(fraction) {
+      percent = Math.max(1, Math.round(fraction * 100))
+      pendingPercent = percent
+      if (!brightnessWrite.running) flush()
+    }
+
+    function flush() {
+      if (pendingPercent < 0) return
+      brightnessWrite.command = ["brightnessctl", "--class=backlight", "--quiet", "set", pendingPercent + "%"]
+      pendingPercent = -1
+      brightnessWrite.running = true
+    }
+  }
+
+  Process {
+    id: brightnessRead
+    command: ["brightnessctl", "--class=backlight", "--machine-readable", "info"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // device,class,current,percent%,max
+        var parts = String(text || "").trim().split(",")
+        var value = parts.length >= 4 ? parseInt(parts[3], 10) : NaN
+        brightness.available = isFinite(value)
+        if (isFinite(value)) brightness.percent = value
+      }
+    }
+    onExited: function(exitCode) { if (exitCode !== 0) brightness.available = false }
+  }
+
+  Process {
+    id: brightnessWrite
+    onExited: brightness.flush()
+  }
+
+  // ---------------------------------------------------------------- volume
+
+  QtObject {
+    id: audio
+
+    readonly property var sink: Pipewire.defaultAudioSink
+    readonly property bool available: !!sink && !!sink.audio
+    readonly property real volume: available ? Math.min(1, sink.audio.volume) : 0
+    readonly property bool muted: available ? sink.audio.muted : false
+    readonly property string icon: {
+      if (!available) return "󰖁"
+      if (muted) return "󰖁"
+      if (volume >= 0.67) return "󰕾"
+      if (volume >= 0.34) return "󰖀"
+      return "󰕿"
+    }
+
+    function setVolume(value) {
+      if (!available) return
+      sink.audio.volume = Math.max(0, Math.min(1, value))
+      if (sink.audio.muted && value > 0) sink.audio.muted = false
+    }
+
+    function toggleMute() {
+      if (available) sink.audio.muted = !sink.audio.muted
+    }
+  }
+
+  PwObjectTracker { objects: audio.sink ? [audio.sink] : [] }
+
+  // ---------------------------------------------------------------- surface
+
+  // 0 = tucked above the screen, 1 = fully down. Driving the window's
+  // visibility from this lets the sheet finish sliding up before it unmaps.
+  property real reveal: opened ? 1 : 0
+  Behavior on reveal { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+
+  readonly property color foreground: Color.popups.text
+  readonly property int pad: Style.spacing.panelPadding
+  readonly property int gap: Style.spacing.lg
+
+  PanelWindow {
+    id: window
+
+    visible: root.opened || root.reveal > 0
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-mobile-quicksettings"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+    Rectangle {
+      anchors.fill: parent
+      color: Color.menu.scrim
+      opacity: root.reveal
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      onClicked: root.dismiss()
+    }
+
+    BorderSurface {
+      id: sheet
+
+      x: Style.gapsOut
+      width: parent.width - Style.gapsOut * 2
+      height: content.implicitHeight + sheet.contentTopInset + sheet.contentBottomInset
+      y: Style.gapsOut - (height + Style.gapsOut * 2) * (1 - root.reveal) + drag.offset
+      color: Color.popups.background
+      borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
+      radius: Style.cornerRadius
+      padding: root.pad
+
+      focus: root.opened
+      Keys.onEscapePressed: root.dismiss()
+
+      // Swallow taps inside the sheet so they don't reach the scrim, and turn
+      // an upward swipe anywhere on it into a dismiss.
+      MouseArea {
+        id: drag
+        anchors.fill: parent
+        property real startY: 0
+        property real offset: 0
+        onPressed: function(mouse) { startY = mouse.y; offset = 0 }
+        onPositionChanged: function(mouse) { offset = Math.min(0, mouse.y - startY) }
+        onReleased: {
+          if (offset < -Style.space(60)) root.dismiss()
+          offset = 0
+        }
+        onCanceled: offset = 0
+      }
+
+      Column {
+        id: content
+        anchors.fill: parent
+        anchors.topMargin: sheet.contentTopInset
+        anchors.rightMargin: sheet.contentRightInset
+        anchors.bottomMargin: sheet.contentBottomInset
+        anchors.leftMargin: sheet.contentLeftInset
+        spacing: root.pad
+
+        // ---------- Header: time and date, battery on the right
+        Item {
+          width: parent.width
+          implicitHeight: Math.max(headerClock.implicitHeight, headerBattery.implicitHeight)
+
+          Column {
+            id: headerClock
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.spacing.xxs
+
+            Text {
+              textFormat: Text.PlainText
+              text: Qt.formatDateTime(clock.date, "HH:mm")
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.displayLarge
+              font.bold: true
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: Qt.formatDateTime(clock.date, "dddd, d MMMM")
+              color: Qt.darker(root.foreground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+            }
+          }
+
+          Text {
+            id: headerBattery
+            visible: root.hasBattery
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.hasBattery
+              ? (UPower.onBattery ? "󰁹 " : "󰂄 ") + Math.round(root.battery.percentage * 100) + "%"
+              : ""
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.title
+          }
+        }
+
+        PanelSeparator { foreground: root.foreground }
+
+        // ---------- Toggle tiles
+        Grid {
+          id: tiles
+          width: parent.width
+          columns: 2
+          columnSpacing: root.gap
+          rowSpacing: root.gap
+
+          readonly property real tileWidth: (width - columnSpacing) / 2
+
+          Tile {
+            width: tiles.tileWidth
+            icon: wifi.enabled ? "󰤨" : "󰤭"
+            label: "Wi-Fi"
+            status: wifi.status
+            active: wifi.enabled
+            available: wifi.available
+            onClicked: wifi.toggle()
+          }
+
+          Tile {
+            width: tiles.tileWidth
+            icon: bluetooth.enabled ? (bluetooth.connected ? "󰂱" : "󰂯") : "󰂲"
+            label: "Bluetooth"
+            status: bluetooth.status
+            active: bluetooth.enabled
+            available: bluetooth.available
+            busy: bluetooth.pending
+            onClicked: bluetooth.toggle()
+          }
+
+          Tile {
+            width: tiles.tileWidth
+            icon: "󰞃"
+            label: "Mobile data"
+            status: mobileData.status
+            active: mobileData.enabled
+            available: mobileData.available
+            onClicked: mobileData.toggle()
+          }
+
+          Tile {
+            width: tiles.tileWidth
+            icon: "󰑵"
+            label: "Rotation lock"
+            status: rotationLock.status
+            active: rotationLock.enabled
+            available: rotationLock.available
+            onClicked: rotationLock.toggle()
+          }
+
+          Tile {
+            width: tiles.tileWidth
+            icon: "󰉄"
+            label: "Torch"
+            status: torch.status
+            active: torch.enabled
+            available: torch.available
+            onClicked: torch.toggle()
+          }
+
+          Tile {
+            width: tiles.tileWidth
+            icon: dnd.enabled ? "󰂛" : "󰂚"
+            label: "Do not disturb"
+            status: dnd.enabled ? "On" : "Off"
+            active: dnd.enabled
+            available: dnd.available
+            onClicked: dnd.toggle()
+          }
+        }
+
+        PanelSeparator { foreground: root.foreground }
+
+        // ---------- Sliders
+        Column {
+          width: parent.width
+          spacing: Style.spacing.sm
+
+          SliderRow {
+            width: parent.width
+            icon: "󰃠"
+            value: brightness.percent / 100
+            available: brightness.available
+            unavailableText: "No backlight"
+            onMoved: function(value) { brightness.set(value) }
+          }
+
+          SliderRow {
+            width: parent.width
+            icon: audio.icon
+            value: audio.volume
+            available: audio.available
+            unavailableText: "No audio output"
+            onMoved: function(value) { audio.setVolume(value) }
+            onIconClicked: audio.toggleMute()
+          }
+        }
+
+        // ---------- Handle: a visible cue that the sheet swipes back up
+        Item {
+          width: parent.width
+          height: Math.max(24, Style.space(24))
+
+          Rectangle {
+            anchors.centerIn: parent
+            width: Style.space(48)
+            height: Math.max(4, Style.space(4))
+            radius: height / 2
+            color: Util.alpha(root.foreground, 0.35)
+          }
+        }
+      }
+    }
+  }
+}

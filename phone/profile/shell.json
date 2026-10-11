@@ -4,20 +4,28 @@
     "screensaver": 0,
     "lock": 0
   },
+  "disabledPlugins": [
+    "omarchy.idle"
+  ],
   "bar": {
-    "id": "omarchy.bar",
+    "id": "omarchy-mobile.bar",
     "position": "top",
     "transparent": false,
-    "centerAnchor": "omarchy.clock",
+    "clockFormat": "HH:mm",
+    "showBatteryPercent": true,
+    "quickSettings": "omarchy-mobile.quicksettings",
     "layout": {
-      "left": [ { "id": "omarchy.clock", "format": "HH:mm" } ],
+      "left": [],
       "center": [],
-      "right": [
-        { "id": "omarchy.network" },
-        { "id": "omarchy.audio" },
-        { "id": "omarchy.power" }
-      ]
+      "right": []
     }
   },
-  "plugins": []
+  "plugins": [
+    {
+      "id": "omarchy-mobile.quicksettings"
+    },
+    {
+      "id": "omarchy-mobile.launcher"
+    }
+  ]
 }

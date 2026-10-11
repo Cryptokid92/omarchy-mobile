@@ -17,7 +17,7 @@ end
 hl.config({
   general = { gaps_in = 4, gaps_out = 6, border_size = 2 },
   decoration = { rounding = 0 },
-  misc = { disable_hyprland_logo = true, disable_splash_rendering = true },
+  misc = { disable_hyprland_logo = true, disable_splash_rendering = true, disable_watchdog_warning = true },
 })
 
 -- The outer desktop owns SUPER, so the phone session uses ALT

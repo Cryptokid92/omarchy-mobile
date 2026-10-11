@@ -1,0 +1,243 @@
+<!-- SPDX-License-Identifier: MIT -->
+# Omarchy Mobile plugins
+
+Phone surfaces for Omarchy's own shell, written as ordinary third-party
+Omarchy plugins. Nothing in Omarchy is patched: each directory here is a
+plugin with a `manifest.json`, discovered from `~/.config/omarchy/plugins/`
+and switched on by `phone/profile/shell.json`. They draw with the shell's
+`qs.Commons` (Color, Style, Border) and `qs.Ui` components, so they follow
+the current Omarchy theme: fonts, colours, borders, corner rounding, spacing.
+
+All touch targets are at least 44 logical px (the Pixel 7 Pro is 480x1040
+logical at scale 3).
+
+| Plugin | Kind | What it is |
+| --- | --- | --- |
+| `omarchy-mobile.bar` | `bar` | Status bar: clock, connectivity, battery; tap or pull down for quick settings |
+| `omarchy-mobile.quicksettings` | `panel` (keepLoaded) | Pull-down sheet: six toggle tiles, brightness and volume |
+| `omarchy-mobile.launcher` | `panel` (keepLoaded) | Home bar: app search, app grid and coding-agent prompt in one input |
+| lockpad | none | Not built; see [Lock screen](#lock-screen-pin-pad) for why and what upstream needs |
+
+## Enabling
+
+`phone/profile/shell.json` already does this:
+
+```json
+{
+  "bar": { "id": "omarchy-mobile.bar", "clockFormat": "HH:mm", "showBatteryPercent": true,
+           "quickSettings": "omarchy-mobile.quicksettings" },
+  "plugins": [
+    { "id": "omarchy-mobile.quicksettings" },
+    { "id": "omarchy-mobile.launcher" }
+  ]
+}
+```
+
+It also lists `omarchy.idle` under `disabledPlugins`. An idle timeout of `0`
+means "act immediately" to that service, not "never", so the old profile ran
+the screensaver and `omarchy-system-lock` the moment the session went idle.
+The phone has no touch lock yet (below), so idle stays off for now.
+
+## omarchy-mobile.bar
+
+A full bar that replaces `omarchy.bar`. It is 44 px tall (or the theme's bar
+size if larger), anchored to the top, and reserves its height so windows tile
+below it. Left: the clock. Right: do-not-disturb (when on), Bluetooth (when
+on), cellular signal (when a modem exists), Wi-Fi or Ethernet, battery glyph
+and percentage. The centre is left empty for the camera cutout.
+
+The whole strip is one touch target: a tap toggles quick settings, a downward
+pull past ~14 px opens it.
+
+Sources: `Quickshell.Networking` (NetworkManager) for Wi-Fi/Ethernet,
+`Quickshell.Bluetooth`, `UPower.displayDevice`, and the do-not-disturb flag
+through the host's `omarchy.notifications` proxy (only full bars get that).
+Glyphs are the same sets Omarchy's network and power panels use.
+
+Settings live on the `bar` object in `shell.json`:
+
+| Key | Default | |
+| --- | --- | --- |
+| `clockFormat` | `"HH:mm"` | Qt date format |
+| `showBatteryPercent` | `true` | |
+| `quickSettings` | `"omarchy-mobile.quicksettings"` | Plugin id the bar opens |
+
+**Stubbed:** cellular signal. `Quickshell.Networking` has no modem backend and
+the Pixel 7 Pro modem has no mainline driver, so `cellular.available` is
+hard-wired to `false` and the icon never renders.
+
+IPC (`omarchy-shell omarchy-mobile.bar <method>`), for edge-swipe gestures or
+hardware keys:
+
+| Method | Effect |
+| --- | --- |
+| `pullDown` | Open quick settings |
+| `toggleQuickSettings` | Open or close it |
+
+## omarchy-mobile.quicksettings
+
+A sheet that slides down from the top edge over the status bar, styled as an
+Omarchy popup (popups background and border). It has a clock and date header,
+six toggle tiles in two columns, then brightness and volume sliders. Tap the
+scrim, swipe the sheet up, or press Escape to close it.
+
+| Tile | Backend |
+| --- | --- |
+| Wi-Fi | `Networking.wifiEnabled` (NetworkManager); status shows the SSID |
+| Bluetooth | `omarchy-bluetooth-power on/off`, the same rfkill path as Omarchy's Bluetooth panel |
+| Mobile data | **Stub**: no modem backend (ModemManager wiring is the TODO) |
+| Rotation lock | **Stub**: no accelerometer / iio-sensor-proxy and no rotation daemon yet |
+| Torch | **Stub**: the flash LED has no mainline driver; once a `*:flash`/`*:torch` LED appears in `/sys/class/leds`, drive it with `brightnessctl -d` |
+| Do not disturb | The notification service's `notifications` IPC target on this shell instance |
+| Brightness slider | `brightnessctl --class=backlight` (the panel backlight; dimmed when there is none) |
+| Volume slider | PipeWire default sink; tap the speaker glyph to mute |
+
+Stub tiles render dimmed, report "No modem" / "No sensor" / "No flash LED",
+and do nothing when tapped. Their `toggle()` bodies are deliberately empty.
+
+The plugin is `keepLoaded` so the sheet can animate out before it unmaps.
+
+IPC:
+
+| Call | Effect |
+| --- | --- |
+| `omarchy-shell shell toggle omarchy-mobile.quicksettings '{}'` | Open or close |
+| `omarchy-shell shell summon omarchy-mobile.quicksettings '{}'` / `hide omarchy-mobile.quicksettings` | Open / close |
+| `omarchy-shell shell call omarchy-mobile.quicksettings state ''` | JSON: open state, Wi-Fi, Bluetooth, DND, brightness, volume |
+| `omarchy-shell shell call omarchy-mobile.quicksettings toggleTile <name>` | Same as tapping a tile. Names: `wifi`, `bluetooth`, `mobile-data`, `rotation-lock`, `torch`, `dnd`. Returns the new state, `unavailable` or `unknown` |
+
+## omarchy-mobile.launcher
+
+The home surface, after Omalauncher: one bar along the bottom of the screen.
+
+* **Dock (always on screen).** A search pill, "Search apps or ask Claude…",
+  in a bar-coloured strip that reserves its height so windows tile above it.
+  Tapping it opens the drawer.
+* **Drawer.** The app grid (4 columns of 44 px icons with names) under the
+  status bar, with the one input at the bottom, focused. Typing filters the
+  grid; while searching, results stack upward from the input so the best match
+  sits by your thumb, highlighted.
+* **Ask the agent.** Any text also offers an "Ask Claude" row above the input.
+  Text that reads as a prompt (3+ words, ends in `?`, `.` or `!`, or matches no
+  app) makes that row the primary action: it is highlighted, the input glyph
+  turns into the agent, and Enter asks the agent instead of launching the top
+  app. Asking runs `terminalCommand + agentCommand + [prompt]`, with the prompt
+  as a single argv element (no shell parsing), then closes the drawer.
+
+Apps come from Omarchy's application library (`services/AppLibrary.qml`): the
+same entries, hidden-entry filters, icon index and `uwsm-app -- gtk-launch`
+launch path as the Omarchy menu.
+
+Settings: defaults are in `manifest.json` under `settings.defaults`; override
+any of them on the plugin's entry in `shell.json`, which the launcher watches:
+
+```json
+{ "id": "omarchy-mobile.launcher", "agentName": "Codex", "agentCommand": ["codex"],
+  "agentIcon": "shell/plugins/agents/assets/codex.svg" }
+```
+
+| Key | Default | |
+| --- | --- | --- |
+| `agentName` | `"Claude"` | Shown as "Ask <name>" |
+| `agentCommand` | `["claude"]` | The prompt is appended as one argument |
+| `agentIcon` | `"shell/plugins/agents/assets/claude.svg"` | Absolute, or relative to `$OMARCHY_PATH` (reuses the Agents plugin's marks) |
+| `terminalCommand` | `["xdg-terminal-exec"]` | |
+| `columns` | `4` | 3 to 6 |
+| `sentenceWords` | `3` | Word count at which text counts as a prompt |
+
+IPC:
+
+| Call | Effect |
+| --- | --- |
+| `omarchy-shell shell summon omarchy-mobile.launcher '{"query":"fix the tests"}'` | Open the drawer, optionally pre-filled |
+| `omarchy-shell shell hide omarchy-mobile.launcher` | Close the drawer (the dock stays) |
+| `omarchy-shell shell call omarchy-mobile.launcher search <text>` | Open and type; returns the mode (`apps`/`agent`) and the top app ids |
+| `omarchy-shell shell call omarchy-mobile.launcher ask <prompt>` | Ask the agent directly |
+| `omarchy-shell shell call omarchy-mobile.launcher state ''` | JSON: open state, query, mode, app count, agent argv |
+
+## Testing in the desktop harness
+
+`phone/dev/run-desktop` copies the shell and runs it in a nested Hyprland, so
+point IPC at that copy and its Wayland display, never at
+`/usr/share/omarchy/shell` (your real desktop):
+
+```sh
+HOME=~/android/phone-dev/home WAYLAND_DISPLAY=wayland-2 \
+  quickshell ipc -p ~/android/phone-dev/shell call shell listPlugins
+```
+
+(`quickshell list --all` shows which `wayland-N` the nested shell is on.)
+`WAYLAND_DISPLAY=wayland-2 grim out.png` screenshots the nested screen and
+`WAYLAND_DISPLAY=wayland-2 wtype 'text'` types into the launcher.
+
+Hot reload is not enough for every change. Relaunch the harness after:
+
+* adding a new file to a plugin directory (Qt's type loader caches each
+  directory's listing, so a file that appears later stays "No such file");
+* editing a `keepLoaded` plugin (quick settings, launcher): the reload
+  rebuilds it from the cached component;
+* editing `phone/profile/shell.json` (it is copied at launch).
+
+## Plugin API limits found
+
+### Lock screen PIN pad
+
+There is no `lockpad` plugin, because a third-party plugin cannot provide the
+lock screen's input without going around Omarchy's lock.
+
+* `omarchy.lock` is a first-party `service` whose manifest carries
+  `omarchy.capabilities: ["authentication"]`. The host stamps that capability
+  only onto first-party manifests (and onto user clones made with
+  `omarchy plugin clone`, which inherit it through `omarchy.clonedFrom`), keeps
+  authentication services in a private store outside the QML object graph,
+  and never hands them to other plugins' facades. Good, and intended.
+* `LockView.qml` has one input: a fixed 381x67 password field driven by key
+  events. There is no extension point for another input surface, and an
+  on-screen keyboard is a layer-shell client that the compositor does not
+  show over an `ext-session-lock` surface, so a phone with no hardware
+  keyboard cannot unlock it at all.
+* A plugin *could* import `Quickshell.Wayland` and `Quickshell.Services.Pam`
+  and run its own `WlSessionLock`. That would be a second lock client
+  competing with `omarchy.lock`: `omarchy-system-lock`, `omarchy.idle`, the
+  stranded-lock recovery and the fingerprint flow all drive `omarchy.lock`, so
+  the two would fight over the session. Shipping a plugin that declares
+  `clonedFrom: omarchy.lock` just to inherit the capability would abuse the
+  clone mechanism, which exists for a user's own copy.
+
+What upstream needs instead, smallest first:
+
+1. **A touch input mode in `LockView`.** A `lock.input` setting (`"password"`
+   default, `"pin"`) in `shell.json` or the theme's `shell.lock.toml`. In PIN
+   mode the view renders a numeric keypad (12 keys, at least 64 px on a phone)
+   plus delete and enter, feeding the existing `passwordTextEdited` /
+   `submitPassword` signals. PAM is unchanged: the PIN is a numeric password
+   for `omarchy-lock-password`, or a separate `omarchy-lock-pin` PAM service if
+   the PIN should differ from the login password. The keypad lives inside the
+   session-lock surface, so no external keyboard client is needed.
+2. **Or a `lock-input` plugin kind.** `omarchy.lock` loads a declared input
+   component *inside* its own `WlSessionLockSurface`. The component gets a
+   narrow facade (`append(char)`, `backspace()`, `submit()`, `failureMessage`,
+   `authenticating`) and never the `PamContext` or the service, so the
+   authentication boundary stays where it is while the input surface becomes
+   replaceable.
+
+### Smaller ones
+
+* **Third-party `menu` plugins lose their shell facade.** In `shell.qml` the
+  panel loader passes `modelData.manifest` from an `Instantiator` model to
+  `pluginShellFor()`. Arrays inside `modelData` are not JS arrays
+  (`Array.isArray()` is `false`), so `manifestHasKind(manifest, "menu")`
+  fails: the facade is built without `appLibrary`, and on the next config
+  change `prunePluginApis()` (which reads the registry's real manifest) sees a
+  different capability profile and destroys the facade, leaving the plugin's
+  `shell` null. The launcher therefore declares `panel` and instantiates
+  Omarchy's `AppLibrary` type itself via `import qs.services`. Fix upstream:
+  pass `shell.pluginRegistry.installedPlugins[panelEntry.pluginId]` to the
+  loader's injections (or make `manifestHasKind` accept array-likes).
+* **Panel plugins get no settings.** Inline settings on a `plugins[]` entry are
+  only handed to bar widgets, so the launcher reads its own entry from
+  `shell.json` with a `FileView`.
+* **Panel plugins cannot reach do-not-disturb.** The host proxies
+  `omarchy.notifications` only to full bars. Quick settings calls the
+  `notifications` IPC target on its own shell instance (`qs ipc -p
+  Quickshell.shellDir`) instead.

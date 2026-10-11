@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchy-mobile.launcher",
+  "name": "Mobile launcher",
+  "version": "0.1.0",
+  "author": "Omarchy Mobile",
+  "license": "MIT",
+  "description": "The phone's home bar: one input at the bottom of the screen that searches apps, opens the app grid and sends a prompt to your coding agent.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Launcher.qml"
+  },
+  "settings": {
+    "defaults": {
+      "agentName": "Claude",
+      "agentCommand": [
+        "claude"
+      ],
+      "agentIcon": "shell/plugins/agents/assets/claude.svg",
+      "terminalCommand": [
+        "xdg-terminal-exec"
+      ],
+      "columns": 4,
+      "sentenceWords": 3
+    },
+    "schema": [
+      {
+        "key": "agentName",
+        "type": "string",
+        "label": "Agent name",
+        "description": "Shown as \"Ask <name>\"."
+      },
+      {
+        "key": "agentCommand",
+        "type": "array",
+        "label": "Agent command",
+        "description": "argv of the agent; the prompt is appended as one argument."
+      },
+      {
+        "key": "agentIcon",
+        "type": "path",
+        "label": "Agent icon",
+        "description": "Absolute path, or relative to $OMARCHY_PATH."
+      },
+      {
+        "key": "terminalCommand",
+        "type": "array",
+        "label": "Terminal command",
+        "description": "argv that runs the agent command in a terminal."
+      },
+      {
+        "key": "columns",
+        "type": "integer",
+        "label": "Grid columns",
+        "min": 3,
+        "max": 6
+      },
+      {
+        "key": "sentenceWords",
+        "type": "integer",
+        "label": "Words that make a prompt",
+        "min": 2,
+        "max": 8
+      }
+    ]
+  }
+}
