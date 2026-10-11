@@ -1,0 +1,30 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Omandroid's user setup: what a platform's "setup-user" step does in
+# Omarchy's lifecycle contract (docs/lifecycle-dispatch.md upstream). Runs as
+# the user. Each step runs once, tracked with Omarchy's own omarchy-done
+# markers, so the user's later changes are never overwritten.
+set -euo pipefail
+
+share=/usr/share/omandroid/phone
+config=~/.config/omarchy
+
+# A phone has no keyboard-first workflow: skip Omarchy's "Learn Keybindings"
+# welcome (see patches/omarchy/0001-first-run-...patch).
+omarchy-done mark welcome-keybindings-not-applicable
+
+# Phone shell plugins: link them, so package updates reach the user
+mkdir -p "$config/plugins"
+for plugin in "$share"/plugins/omandroid.*; do
+  ln -sfn "$plugin" "$config/plugins/$(basename "$plugin")"
+done
+
+# Phone shell profile (bar, quick settings, launcher), seeded once
+if omarchy-done ensure omandroid-shell-profile; then
+  cp "$share/profile/shell.json" "$config/shell.json"
+fi
+
+# Phone scale: 1440x3120 at 3 is 480x1040 logical, seeded once
+if omarchy-done ensure omandroid-monitor-scale; then
+  sed -i 's/^local omarchy_monitor_scale = .*/local omarchy_monitor_scale = 3/' ~/.config/hypr/monitors.lua
+fi

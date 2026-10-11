@@ -8,7 +8,7 @@ function isPlainObject(value) {
 }
 
 // Manifest defaults, overlaid with the plugin's entry in shell.json
-// (`plugins: [{ "id": "omandroid.launcher", "agentName": "Codex", ... }]`).
+// (`plugins: [{ "id": "omandroid.launcher", "columns": 5, ... }]`).
 function mergedSettings(defaults, config, pluginId) {
   var out = {}
   var base = isPlainObject(defaults) ? defaults : {}
@@ -43,11 +43,31 @@ function looksLikePrompt(query, appMatches, sentenceWords) {
   return appMatches === 0
 }
 
-// The argv that opens a terminal running the agent with the prompt as its
-// first message: terminal... agent... prompt. The prompt stays one argument.
-function agentArgv(terminal, agent, prompt) {
-  return terminal.concat(agent, [String(prompt || "").trim()])
+// Display names for the agents omarchy-default-agent knows, as Omarchy
+// names them. Anything else shows its id.
+var AGENT_NAMES = {
+  pi: "Pi", omp: "Oh My Pi", opencode: "OpenCode", claude: "Claude Code",
+  codex: "Codex", crush: "Crush", grok: "Grok", gemini: "Gemini",
+  openclaw: "OpenClaw", hermes: "Hermes", copilot: "GitHub Copilot",
+  muse: "Muse Code", "cursor-agent": "Cursor CLI"
 }
+
+// The agent id from ~/.config/omarchy/defaults/agent (first line), or "".
+function agentId(fileText) {
+  return String(fileText || "").split("\n")[0].trim()
+}
+
+function agentName(id) {
+  return id ? (AGENT_NAMES[id] || id) : ""
+}
+
+// Omarchy launches the user's chosen agent, in its own terminal, with the
+// prompt as one argument. Without a chosen agent, open Omarchy's picker.
+function promptArgv(prompt) {
+  return ["omarchy-agent-prompt", String(prompt || "").trim()]
+}
+
+var PICK_AGENT_ARGV = ["omarchy", "menu", "summon", "setup.default.agent"]
 
 if (typeof module !== "undefined") {
   module.exports = {
@@ -55,6 +75,9 @@ if (typeof module !== "undefined") {
     argv: argv,
     wordCount: wordCount,
     looksLikePrompt: looksLikePrompt,
-    agentArgv: agentArgv
+    agentId: agentId,
+    agentName: agentName,
+    promptArgv: promptArgv,
+    PICK_AGENT_ARGV: PICK_AGENT_ARGV
   }
 }

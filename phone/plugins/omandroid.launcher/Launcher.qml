@@ -14,7 +14,8 @@ import "LauncherModel.js" as LauncherModel
 //
 // Collapsed, it is a dock holding a single search pill. Tapping it raises the
 // app drawer with the input focused. Typing filters the grid; text that reads
-// like a sentence (or matches no app) offers "Ask <agent>" instead, and Enter
+// like a sentence (or matches no app) offers "Ask <agent>" (the user's
+// Omarchy default agent) instead, and Enter
 // takes whichever is on top: the first app, or a terminal running the agent
 // with the text as its first prompt.
 //
@@ -57,14 +58,25 @@ Item {
   readonly property var settings: LauncherModel.mergedSettings(
     manifest && manifest.settings ? manifest.settings.defaults : ({}), shellConfig, pluginId)
 
-  readonly property string agentName: String(settings.agentName || "Claude")
-  readonly property var agentCommand: LauncherModel.argv(settings.agentCommand, ["claude"])
-  readonly property var terminalCommand: LauncherModel.argv(settings.terminalCommand, ["xdg-terminal-exec"])
-  readonly property string agentIcon: {
-    var icon = String(settings.agentIcon || "")
-    if (!icon) return ""
-    return icon.charAt(0) === "/" ? Util.fileUrl(icon) : Util.fileUrl(omarchyPath + "/" + icon)
+  // The coding agent is the user's choice, made the Omarchy way:
+  // omarchy-default-agent stores it in ~/.config/omarchy/defaults/agent and
+  // leaves it unset until the user picks one. Read it live so a choice made
+  // in Omarchy's menu shows up here at once.
+  property string agentId: ""
+  readonly property string agentName: LauncherModel.agentName(agentId)
+  readonly property bool hasAgent: agentId.length > 0
+  readonly property string agentIcon: hasAgent
+    ? Util.fileUrl(omarchyPath + "/shell/plugins/agents/assets/" + agentId + ".svg") : ""
+
+  FileView {
+    path: Quickshell.env("HOME") + "/.config/omarchy/defaults/agent"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.agentId = LauncherModel.agentId(text())
+    onLoadFailed: root.agentId = ""
   }
+
   readonly property int columns: Math.max(3, Math.min(6, Number(settings.columns) || 4))
   readonly property int sentenceWords: Math.max(2, Number(settings.sentenceWords) || 3)
 
@@ -115,7 +127,12 @@ Item {
   function askAgent(prompt) {
     var text = String(prompt || "").trim()
     if (!text) return "empty"
-    Util.execArgv(LauncherModel.agentArgv(terminalCommand, agentCommand, text))
+    if (!hasAgent) {
+      Util.execArgv(LauncherModel.PICK_AGENT_ARGV)
+      dismiss()
+      return "pick-agent"
+    }
+    Util.execArgv(LauncherModel.promptArgv(text))
     dismiss()
     return "ok"
   }
@@ -172,8 +189,8 @@ Item {
       mode: hasQuery ? (promptMode ? "agent" : "apps") : "idle",
       apps: apps.length,
       library: shell && shell.appLibrary ? "host" : (appLibrary ? "local" : "none"),
-      agent: agentName,
-      command: LauncherModel.agentArgv(terminalCommand, agentCommand, "<prompt>")
+      agent: agentId,
+      command: hasAgent ? LauncherModel.promptArgv("<prompt>") : LauncherModel.PICK_AGENT_ARGV
     })
   }
 
@@ -207,7 +224,7 @@ Item {
       SearchPill {
         anchors.fill: parent
         anchors.margins: Style.spacing.xxl
-        placeholder: "Search apps or ask " + root.agentName + "…"
+        placeholder: (root.hasAgent ? "Search apps or ask " + root.agentName + "…" : "Search apps…")
         onTapped: root.expand()
       }
     }
@@ -369,7 +386,7 @@ Item {
           Text {
             width: parent.width
             textFormat: Text.PlainText
-            text: "Ask " + root.agentName
+            text: root.hasAgent ? "Ask " + root.agentName : "Choose your agent"
             color: root.promptMode ? Commons.Color.menu.selectedText : root.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.subtitle
@@ -423,7 +440,7 @@ Item {
           verticalAlignment: TextInput.AlignVCenter
           font.pixelSize: Style.font.title
           leftPadding: Style.spacing.controlPaddingX + Style.font.iconLarge + Style.spacing.xl
-          placeholderText: "Search apps or ask " + root.agentName + "…"
+          placeholderText: (root.hasAgent ? "Search apps or ask " + root.agentName + "…" : "Search apps…")
           foreground: root.foreground
           text: root.query
           onTextEdited: root.query = text
