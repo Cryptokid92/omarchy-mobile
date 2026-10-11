@@ -11,6 +11,43 @@ mount -t devtmpfs devtmpfs /dev
 mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
 mount -t configfs configfs /sys/kernel/config
 mount -t tmpfs tmpfs /run
+
+# --- UFS safety: every SCSI disk is read-only, before anything else runs ---
+# The UFS device holds irreplaceable per-device calibration (efs, persist,
+# modem_userdata). Until UFS support is trusted, mark every /dev/sd* disk and
+# partition read-only as soon as it appears, and never mount anything. The
+# driver is built in, so disks can exist before init starts or show up while
+# it runs: do one pass now, then keep a watcher running for the life of PID 1.
+# Nothing in this initramfs runs mdev/udev, so no one else touches the disks.
+ufs_ro_log() { echo "omandroid: ufs-ro: $*" > /dev/kmsg; }
+# Each disk and each partition gets its own read-only flag (a partition's
+# sysfs "ro" already reads 1 once its disk is ro, so track what was done in
+# /run/ufs-ro instead). Uses only shell builtins when there is nothing to do,
+# so the watcher costs next to nothing.
+mkdir -p /run/ufs-ro
+ufs_ro_pass() {
+  local s ro name
+  for s in /sys/block/sd* /sys/block/sd*/sd*; do
+    [ -r "$s/ro" ] || continue
+    name=${s##*/}
+    [ -e "/run/ufs-ro/$name" ] && continue
+    [ -b "/dev/$name" ] || continue  # devtmpfs node not there yet: next pass
+    blockdev --setro "/dev/$name"
+    read -r ro < "$s/ro"
+    if [ "$ro" = 1 ]; then
+      : > "/run/ufs-ro/$name"
+      ufs_ro_log "/dev/$name set read-only"
+    elif [ ! -e "/run/ufs-ro/$name.failed" ]; then
+      : > "/run/ufs-ro/$name.failed"  # keep retrying, but log once
+      ufs_ro_log "FAILED to set /dev/$name read-only"
+      echo "omandroid: WARNING: /dev/$name is NOT read-only" > /dev/tty0 2>/dev/null
+    fi
+  done
+}
+ufs_ro_pass
+( while true; do ufs_ro_pass; sleep 0.2 2>/dev/null || sleep 1; done ) &
+ufs_ro_log "guard running (pid $!)"
+
 hostname omandroid
 
 say() { echo "omandroid: $*" | tee /dev/kmsg > /dev/tty0 2>/dev/null; }
@@ -97,6 +134,36 @@ grep -q omandroid.debug /proc/cmdline && {
   tr ' ' '\n' < /proc/cmdline | tail -12 | tr '\n' ' '
   echo
 } > /dev/tty0 2>&1
+
+# UFS probe report when the cmdline has omandroid.ufs-probe: wait for the
+# disks to settle, then list them and the GPT partition names. Read-only: it
+# only reads /proc and sysfs, after the guard above has marked the disks ro.
+grep -q omandroid.ufs-probe /proc/cmdline && (
+  last=-1
+  for i in $(seq 1 30); do
+    n=$(ls -d /sys/block/sd*/sd* 2>/dev/null | wc -l)
+    [ "$n" -gt 0 ] && [ "$n" = "$last" ] && break
+    last=$n
+    sleep 1
+  done
+  ufs_ro_pass
+  {
+    echo "=== ufs-probe: $(ls -d /sys/block/sd* 2>/dev/null | wc -l) disks, $n partitions ==="
+    cat /proc/partitions
+    for d in /sys/block/sd*; do
+      [ -e "$d" ] || { echo "no /sys/block/sd* (UFS did not enumerate)"; break; }
+      echo "${d##*/}: ro=$(cat "$d/ro") size=$(cat "$d/size") model=$(cat "$d/device/model" 2>/dev/null)"
+      for p in "$d"/sd*; do
+        [ -e "$p/uevent" ] || continue
+        echo "  ${p##*/} ro=$(cat "$p/ro") $(grep '^PARTNAME=' "$p/uevent")"
+      done
+    done
+    echo "=== ufs-probe: dmesg ==="
+    dmesg | grep -iE 'ufs|scsi|sd[a-z]|14700000' | tail -25
+  } > /run/ufs-probe.txt 2>&1
+  cat /run/ufs-probe.txt > /dev/tty0 2>/dev/null
+  while read -r line; do echo "omandroid: $line" > /dev/kmsg; done < /run/ufs-probe.txt
+) &
 
 say "ready"
 
