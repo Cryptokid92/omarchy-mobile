@@ -1,0 +1,45 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# run-desktop: run the Omarchy phone profile in a phone-sized nested Hyprland window.
+#
+# Nothing in your real ~/.config is touched: the shell runs with its own home
+# directory under ~/android/phone-dev/home, which links in your current theme
+# and this repo's phone plugins.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+DEV="${PHONE_DEV:-$HOME/android/phone-dev}"
+OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+FAKE_HOME="$DEV/home"
+
+# A private copy of the shell gives it its own config path, so IPC calls
+# can't reach the desktop's running shell by accident (and vice versa)
+mkdir -p "$DEV"
+rsync -a --delete "$OMARCHY_PATH/shell/" "$DEV/shell/"
+
+mkdir -p "$FAKE_HOME/.config/omarchy" "$FAKE_HOME/.local/state/omarchy"
+ln -sfn "$HOME/.local/state/omarchy/current" "$FAKE_HOME/.local/state/omarchy/current"
+ln -sfn "$ROOT/phone/plugins" "$FAKE_HOME/.config/omarchy/plugins"
+# Copied, not linked: the shell writes to shell.json when settings change
+cp "$ROOT/phone/profile/shell.json" "$FAKE_HOME/.config/omarchy/shell.json"
+
+# Once the nested window appears on the desktop, float it at the phone's
+# 13:6 aspect. Uses the desktop compositor's own dispatchers; no config changes.
+(
+  for _ in $(seq 1 50); do
+    addr=$(hyprctl clients -j 2>/dev/null | python3 -I -c 'import json,sys
+c=[x for x in json.load(sys.stdin) if x.get("class")=="aquamarine"]
+print(c[-1]["address"] if c else "")')
+    if [[ -n "$addr" ]]; then
+      w="address:$addr"
+      hyprctl dispatch "hl.dsp.window.float({ window = \"$w\", action = \"enable\" })" >/dev/null
+      hyprctl dispatch "hl.dsp.window.resize({ window = \"$w\", x = 600, y = 1300 })" >/dev/null
+      hyprctl dispatch "hl.dsp.window.center({ window = \"$w\" })" >/dev/null 2>&1 || true
+      break
+    fi
+    sleep 0.2
+  done
+) &
+
+export PHONE_DEV_SHELL_CMD="env HOME=$FAKE_HOME OMARCHY_PATH=$OMARCHY_PATH quickshell -p $DEV/shell"
+exec env -u HYPRLAND_INSTANCE_SIGNATURE Hyprland -c "$ROOT/phone/dev/hyprland.lua"
