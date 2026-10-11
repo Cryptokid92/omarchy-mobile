@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // A full-width slider row for the quick settings sheet: a 44px tappable glyph
@@ -13,7 +14,7 @@ Item {
   property real value: 0
   property bool available: true
   property string unavailableText: ""
-  property color foreground: Color.popups.text
+  property color foreground: Commons.Color.popups.text
 
   signal moved(real value)
   signal released(real value)
@@ -34,7 +35,7 @@ Item {
     Rectangle {
       anchors.fill: parent
       radius: Style.cornerRadius
-      color: iconTouch.pressed ? Style.pressedFillFor(root.foreground, Color.accent) : "transparent"
+      color: iconTouch.pressed ? Style.pressedFillFor(root.foreground, Commons.Color.accent) : "transparent"
     }
 
     Text {
@@ -69,10 +70,10 @@ Item {
     step: 0.05
     trackHeight: Math.max(6, Style.space(6))
     knobSize: Math.max(22, Style.space(22))
-    trackColor: Style.selectedFillFor(root.foreground, Color.accent)
-    fillColor: Color.accent
+    trackColor: Style.selectedFillFor(root.foreground, Commons.Color.accent)
+    fillColor: Commons.Color.accent
     knobColor: root.foreground
-    tickColor: Color.popups.background
+    tickColor: Commons.Color.popups.background
     onMoved: function(value) { root.moved(value) }
     onReleased: function(value) { root.released(value) }
   }

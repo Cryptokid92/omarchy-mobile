@@ -7,6 +7,7 @@ import Quickshell.Networking
 import Quickshell.Services.UPower
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import "StatusModel.js" as StatusModel
 
 // Phone status bar, a full `bar` option that replaces omarchy.bar.
@@ -37,9 +38,9 @@ Item {
   // in it, so it is never thinner than 44 logical px.
   readonly property int barSize: Math.max(44, Style.bar.sizeHorizontal)
 
-  readonly property color foreground: Color.bar.text
-  readonly property color background: Color.bar.background
-  readonly property color urgent: Color.bar.active
+  readonly property color foreground: Commons.Color.bar.text
+  readonly property color background: Commons.Color.bar.background
+  readonly property color urgent: Commons.Color.bar.active
 
   function setting(name, fallback) {
     var value = barConfig ? barConfig[name] : undefined

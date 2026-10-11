@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // One quick-settings toggle: glyph, name and a one-line status, sized for a
@@ -16,8 +17,8 @@ BorderSurface {
   property bool available: true
   property bool busy: false
 
-  property color foreground: Color.popups.text
-  property color accent: Color.accent
+  property color foreground: Commons.Color.popups.text
+  property color accent: Commons.Color.accent
 
   signal clicked()
 

@@ -8,6 +8,7 @@ import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Pull-down quick settings for the phone. The sheet drops from the top edge
@@ -316,7 +317,7 @@ Item {
   property real reveal: opened ? 1 : 0
   Behavior on reveal { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
-  readonly property color foreground: Color.popups.text
+  readonly property color foreground: Commons.Color.popups.text
   readonly property int pad: Style.spacing.panelPadding
   readonly property int gap: Style.spacing.lg
 
@@ -333,7 +334,7 @@ Item {
 
     Rectangle {
       anchors.fill: parent
-      color: Color.menu.scrim
+      color: Commons.Color.menu.scrim
       opacity: root.reveal
     }
 
@@ -349,8 +350,8 @@ Item {
       width: parent.width - Style.gapsOut * 2
       height: content.implicitHeight + sheet.contentTopInset + sheet.contentBottomInset
       y: Style.gapsOut - (height + Style.gapsOut * 2) * (1 - root.reveal) + drag.offset
-      color: Color.popups.background
-      borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
+      color: Commons.Color.popups.background
+      borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
       radius: Style.cornerRadius
       padding: root.pad
 

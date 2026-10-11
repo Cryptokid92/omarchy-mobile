@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import qs.services as OmarchyServices
 import "LauncherModel.js" as LauncherModel
@@ -178,7 +179,7 @@ Item {
 
   // ---------------------------------------------------------------- geometry
 
-  readonly property color foreground: Color.menu.text
+  readonly property color foreground: Commons.Color.menu.text
   readonly property int touch: Math.max(44, Style.space(44))
   readonly property int inputHeight: Math.max(48, Style.space(48))
   readonly property int dockHeight: inputHeight + Style.spacing.xxl * 2
@@ -199,7 +200,7 @@ Item {
       anchors { bottom: true; left: true; right: true }
       implicitHeight: root.dockHeight
       exclusionMode: ExclusionMode.Auto
-      color: Color.bar.background
+      color: Commons.Color.bar.background
       WlrLayershell.namespace: "omandroid-dock"
       WlrLayershell.layer: WlrLayer.Top
 
@@ -234,7 +235,7 @@ Item {
       height: parent.height
       y: Math.round((1 - root.reveal) * Style.space(80))
       opacity: root.reveal
-      color: Color.menu.background
+      color: Commons.Color.menu.background
 
       // ---------- Header: count and a collapse control
       Item {
@@ -322,11 +323,11 @@ Item {
         anchors.bottomMargin: Style.spacing.lg
         height: Math.max(root.touch, Style.space(52))
         radius: Style.cornerRadius
-        color: askTouch.pressed ? Style.pressedFillFor(root.foreground, Color.accent)
-          : root.promptMode ? Color.menu.selectedBackground : "transparent"
+        color: askTouch.pressed ? Style.pressedFillFor(root.foreground, Commons.Color.accent)
+          : root.promptMode ? Commons.Color.menu.selectedBackground : "transparent"
         borderSpec: root.promptMode
-          ? Border.flat(Color.accent, Math.max(1, Style.normalBorderWidth))
-          : Border.controlSpec("normal", root.foreground, Color.accent)
+          ? Border.flat(Commons.Color.accent, Math.max(1, Style.normalBorderWidth))
+          : Border.controlSpec("normal", root.foreground, Commons.Color.accent)
 
         Item {
           id: askIcon
@@ -351,7 +352,7 @@ Item {
             visible: askImage.status !== Image.Ready
             textFormat: Text.PlainText
             text: "󰚩"
-            color: Color.accent
+            color: Commons.Color.accent
             font.family: Style.font.family
             font.pixelSize: Style.font.display
           }
@@ -369,7 +370,7 @@ Item {
             width: parent.width
             textFormat: Text.PlainText
             text: "Ask " + root.agentName
-            color: root.promptMode ? Color.menu.selectedText : root.foreground
+            color: root.promptMode ? Commons.Color.menu.selectedText : root.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.subtitle
             font.bold: true
@@ -395,7 +396,7 @@ Item {
           visible: root.promptMode
           textFormat: Text.PlainText
           text: "󰌑"
-          color: Color.menu.selectedText
+          color: Commons.Color.menu.selectedText
           font.family: Style.font.family
           font.pixelSize: Style.font.iconLarge
         }
@@ -439,7 +440,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
             text: root.promptMode ? "󰚩" : "󰍉"
-            color: root.promptMode ? Color.accent : Qt.darker(root.foreground, 1.3)
+            color: root.promptMode ? Commons.Color.accent : Qt.darker(root.foreground, 1.3)
             font.family: Style.font.family
             font.pixelSize: Style.font.iconLarge
           }
@@ -458,8 +459,8 @@ Item {
     signal tapped()
 
     radius: Style.cornerRadius
-    color: pillTouch.pressed ? Style.pressedFillFor(root.foreground, Color.accent) : Style.normalFill
-    borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
+    color: pillTouch.pressed ? Style.pressedFillFor(root.foreground, Commons.Color.accent) : Style.normalFill
+    borderSpec: Border.controlSpec("normal", root.foreground, Commons.Color.accent)
 
     Text {
       id: pillIcon
@@ -506,9 +507,9 @@ Item {
       anchors.fill: parent
       anchors.margins: Style.spacing.xs
       radius: Style.cornerRadius
-      color: cellTouch.pressed ? Style.pressedFillFor(root.foreground, Color.accent)
-        : cell.highlighted ? Color.menu.selectedBackground : "transparent"
-      borderSpec: cell.highlighted ? Border.flat(Color.accent, Math.max(1, Style.normalBorderWidth)) : Border.none()
+      color: cellTouch.pressed ? Style.pressedFillFor(root.foreground, Commons.Color.accent)
+        : cell.highlighted ? Commons.Color.menu.selectedBackground : "transparent"
+      borderSpec: cell.highlighted ? Border.flat(Commons.Color.accent, Math.max(1, Style.normalBorderWidth)) : Border.none()
     }
 
     Image {
@@ -536,7 +537,7 @@ Item {
       horizontalAlignment: Text.AlignHCenter
       textFormat: Text.PlainText
       text: root.appLibrary && cell.entry ? root.appLibrary.entryName(cell.entry) : ""
-      color: cell.highlighted ? Color.menu.selectedText : root.foreground
+      color: cell.highlighted ? Commons.Color.menu.selectedText : root.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
       wrapMode: Text.Wrap
