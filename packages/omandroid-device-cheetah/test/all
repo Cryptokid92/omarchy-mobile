@@ -1,0 +1,42 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Tests for omandroid-device-cheetah, from a copy of this directory alone.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+for script in bin/*; do bash -n "$script" || fail "$script parses"; done
+pass "scripts parse"
+
+./build "$tmp/build" || fail "C tools compile"
+pass "C tools compile"
+
+# omandroid-bootctl against a synthetic devinfo: dump works, and a dry run
+# of mark-successful plans exactly one flag byte and writes nothing
+python3 - "$tmp/devinfo" <<'PY'
+import struct, sys
+buf = bytearray(8192)
+buf[0:4] = b"DEVI"
+struct.pack_into("<HH", buf, 4, 3, 15)
+buf[0x30:0x34] = bytes([2, 0x0a, 0, 0])   # slot a: successful, active-bit off
+buf[0x34:0x38] = bytes([1, 0x04, 0, 0])   # slot b: active, not successful
+open(sys.argv[1], "wb").write(buf)
+PY
+cp "$tmp/devinfo" "$tmp/devinfo.orig"
+"$tmp/build/omandroid-bootctl" dump "$tmp/devinfo" | grep -q 'version: 3.15' || fail "bootctl decodes devinfo"
+plan=$("$tmp/build/omandroid-bootctl" mark-successful "$tmp/devinfo" b 2>&1 || true)
+grep -q '0x35: 04 -> 06' <<<"$plan" || fail "mark-successful plans one byte (0x35: 04 -> 06)" 
+cmp -s "$tmp/devinfo" "$tmp/devinfo.orig" || fail "a dry run writes nothing"
+pass "bootctl dry run plans one byte and writes nothing"
+
+./install "$tmp/root" "$tmp/build"
+for f in usr/bin/omandroid-bootctl usr/bin/reboot-to usr/bin/omandroid-boot-success usr/bin/omandroid-setup-system \
+         usr/lib/systemd/system/omandroid-boot-success.service usr/lib/systemd/network/20-usb-gadget.network \
+         usr/lib/udev/rules.d/10-omandroid-storage.rules usr/lib/NetworkManager/conf.d/10-omandroid-usb.conf; do
+  [[ -e $tmp/root/$f ]] || fail "install stages $f"
+done
+[[ $(readlink "$tmp/root/usr/lib/systemd/system/multi-user.target.wants/omandroid-boot-success.service") == ../omandroid-boot-success.service ]] \
+  || fail "the boot-success unit is enabled by a vendor wants link"
+pass "install stages the package"

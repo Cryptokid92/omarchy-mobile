@@ -6,7 +6,7 @@ ConditionPathExists=/proc/bootconfig
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/omandroid-boot-success
+ExecStart=/usr/bin/omandroid-boot-success
 
 [Install]
 WantedBy=multi-user.target
