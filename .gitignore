@@ -1,0 +1,6 @@
+omandroid.local.conf
+out/
+*.zip
+*.img
+keys/
+logs/
