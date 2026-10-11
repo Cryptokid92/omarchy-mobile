@@ -1,0 +1,32 @@
+From a0678c445d27c46c372678069d1e5b78bdca54ee Mon Sep 17 00:00:00 2001
+From: Derek Ross <derekross@gmail.com>
+Date: Sun, 11 Oct 2026 19:15:15 -0400
+Subject: [PATCH] panfrost: add Mali-G710 to the model table
+
+Mali-G710 (Google Tensor G2 / gs201, MediaTek Dimensity 9000) reports
+GPU_ID 0xa862xxxx: arch 10.8, product major 2. Panthor already knows it
+as "Mali-G710" (GPU_PROD_ID_MAKE(10, 2) in panthor_hw.c), but Mesa has no
+model entry, so the Gallium driver refuses the device and PanVK returns
+VK_ERROR_INCOMPATIBLE_DRIVER ("Unknown gpu_id").
+
+G710 and G610 (PAN_PROD_ID(10, 8, 7)) are built from the same Valhall
+shader core; G610 is the configuration with fewer cores. Per-core
+throughput and tile-buffer sizes are therefore the G610 values, and the
+performance counter layout is the "G710" one G610 already uses.
+---
+ src/panfrost/model/pan_model.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/panfrost/model/pan_model.c b/src/panfrost/model/pan_model.c
+index 22fb4f7..00a8c7a 100644
+--- a/src/panfrost/model/pan_model.c
++++ b/src/panfrost/model/pan_model.c
+@@ -85,6 +85,8 @@ const struct pan_model pan_model_list[] = {
+                                               MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
+    VALHALL_MODEL(PAN_PROD_ID(9, 0, 3), 0, "G57",    "G77", MODEL_ANISO(ALL),  MODEL_TB_SIZES(16384,  8192),
+                                               MODEL_RATES_X(2, 4, 8,  32,  32, 8)),
++   VALHALL_MODEL(PAN_PROD_ID(10, 8, 2), 0, "G710",   "G710", MODEL_ANISO(ALL),  MODEL_TB_SIZES(32768, 16384),
++                                              MODEL_RATES_X(4, 8, 16,  64,  64, 16)),
+    VALHALL_MODEL(PAN_PROD_ID(10, 8, 7), 0, "G610",   "G710", MODEL_ANISO(ALL),  MODEL_TB_SIZES(32768, 16384),
+                                               MODEL_RATES_X(4, 8, 16,  64,  64, 16)),
+    /* var/cvt/sfu rates might not be correct (we haven't found any detailed documentation) */

@@ -1,0 +1,265 @@
+# SPDX-License-Identifier: 0BSD
+#
+# Omandroid build of Mesa for the Pixel 7 Pro (Mali-G710 on Panthor).
+#
+# Derived from Arch Linux's mesa PKGBUILD, tag 1-26.2.4-1
+# (https://gitlab.archlinux.org/archlinux/packaging/packages/mesa, 0BSD),
+# which Arch Linux ARM also builds, with ALARM's documented differences
+# (intel-rt off). Omandroid changes:
+#  - 0001-panfrost-add-Mali-G710-to-the-model-table.patch (sent upstream,
+#    see UPSTREAM.md); drop it once Mesa ships the entry.
+#  - aarch64 only, and only the drivers this phone can use: Gallium
+#    panfrost (with kmsro), llvmpipe, softpipe and zink; Vulkan panfrost
+#    (PanVK). Splits: mesa, vulkan-panfrost, vulkan-mesa-implicit-layers
+#    (vulkan-panfrost depends on it). No rusticl, NVK, docs or valgrind,
+#    so no Rust crates and a much shorter native build.
+#  - pkgrel 1.1: makepkg only allows integer[.integer], so the Omandroid
+#    marker lives in the VERSION string (".omandroid1"), which shows up in
+#    GL_VERSION and the libgallium file name.
+#
+# Maintainers of the original: Laurent Carlier, Felix Yan, Jan Alexander
+# Steffens (heftig); contributors Jan de Groot, Andreas Radke.
+
+pkgbase=mesa
+pkgname=(
+  mesa
+  vulkan-panfrost
+  vulkan-mesa-implicit-layers
+)
+pkgver=26.2.4
+_pkgver=${pkgver/[a-z]/-&}
+pkgrel=1.1
+_omandroid=omandroid1
+epoch=1
+pkgdesc="Open-source OpenGL drivers (Omandroid: Mali-G710)"
+url="https://www.mesa3d.org/"
+arch=(aarch64)
+license=("MIT AND BSD-3-Clause AND SGI-B-2.0")
+makedepends=(
+  clang
+  expat
+  glibc
+  libdisplay-info
+  libdrm
+  libelf
+  libgcc
+  libglvnd
+  libstdc++
+  libva
+  libx11
+  libxcb
+  libxext
+  libxml2
+  libxrandr
+  libxshmfence
+  libxxf86vm
+  llvm
+  llvm-libs
+  lm_sensors
+  spirv-llvm-translator
+  spirv-tools
+  systemd-libs
+  vulkan-icd-loader
+  wayland
+  xcb-util-keysyms
+  zlib
+  zstd
+
+  cmake
+  elfutils
+  glslang
+  libclc
+  meson
+  python-mako
+  python-packaging
+  python-ply
+  python-pycparser
+  python-yaml
+  wayland-protocols
+  xorgproto
+)
+options=(
+  # Upstream considers LTO broken until explicit notice
+  # (https://gitlab.freedesktop.org/mesa/mesa/-/issues/11140).
+  !lto
+)
+source=(
+  "https://archive.mesa3d.org/mesa-$_pkgver.tar.xz"{,.sig}
+  0001-panfrost-add-Mali-G710-to-the-model-table.patch
+)
+validpgpkeys=(
+  946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
+  71C4B75620BC75708B4BDB254C95FAAB3EB073EC # Dylan Baker <dylan@pnwbakers.com>
+  8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D # Emil Velikov <emil.l.velikov@gmail.com>
+  57551DE15B968F6341C248F68D8E31AFC32428A6 # Eric Engestrom <eric@engestrom.ch>
+  A5CC9FEC93F2F837CB044912336909B6B25FADFA # Juan A. Suarez Romero <jasuarez@igalia.com>
+  E3E8F480C52ADD73B278EE78E1ECBE07D7D70895 # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>
+)
+b2sums=('28506a9366e3c031acbb52924e43b0ec098f44a3ac3bb839ec2a86fa0faf83652347704b0e58bdc447aaebae5a2a254e5456e0b893755fd7721e57d6b614ecc4'
+        'SKIP'
+        '13c27e8a37c0e838c56b660a798d74565181dab88cb3402a19e2ad026a012f0594d6bc70ad26fe247b324e2aa5429edeb8681e234124a0a978084b549b2641ae')
+sha256sums=('bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9'
+            'SKIP'
+            '1a6ac513fb44579f6ca72a2c92bb7fd86743a4a9dc01f452ac1ab93073100ce1')
+
+prepare() {
+  cd mesa-$_pkgver
+
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    src="${src%.zst}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
+
+  # Include package release in version string so Chromium invalidates
+  # its GPU cache; otherwise it can cause pages to render incorrectly.
+  # https://bugs.launchpad.net/ubuntu/+source/chromium-browser/+bug/2020604
+  echo "$_pkgver-arch$epoch.$pkgrel.$_omandroid" >VERSION
+}
+
+build() {
+  # shellcheck disable=SC2054
+  local meson_options=(
+    --optimization 2
+    -D android-libbacktrace=disabled
+    -D b_ndebug=true
+    -D gallium-drivers=panfrost,llvmpipe,softpipe,zink
+    -D gallium-extra-hud=true
+    -D gallium-mediafoundation=disabled
+    -D gallium-rusticl=false
+    -D gles1=disabled
+    -D html-docs=disabled
+    -D libunwind=disabled
+    -D microsoft-clc=disabled
+    -D valgrind=disabled
+    -D video-codecs=all
+    -D vulkan-drivers=panfrost
+    -D vulkan-layers=device-select,anti-lag
+    -D vulkan-loader-rpath=
+    -D vulkan-manifest-per-architecture=false
+  )
+
+  arch-meson mesa-$_pkgver build "${meson_options[@]}"
+  meson compile -C build
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv -v "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_mesa() {
+  depends=(
+    expat
+    glibc
+    libdrm
+    libelf
+    libgcc
+    libglvnd
+    libstdc++
+    libx11
+    libxcb
+    libxext
+    libxshmfence
+    libxxf86vm
+    llvm-libs
+    lm_sensors
+    spirv-tools
+    wayland
+    zlib
+    zstd
+  )
+  optdepends=("opengl-man-pages: for the OpenGL API man pages")
+  # Same provides/conflicts/replaces as Arch, so this is a drop-in
+  # replacement for the distribution package.
+  provides=(
+    "libva-mesa-driver=$epoch:$pkgver-$pkgrel"
+    "mesa-libgl=$epoch:$pkgver-$pkgrel"
+    libva-driver
+    opengl-driver
+  )
+  conflicts=(
+    'libva-mesa-driver<1:24.2.7-1'
+    'mesa-libgl<17.0.1-2'
+  )
+  replaces=(
+    'libva-mesa-driver<1:24.2.7-1'
+    'mesa-libgl<17.0.1-2'
+  )
+
+  meson install -C build --destdir "$pkgdir" --no-rebuild
+
+  (
+    local libdir=usr/lib
+
+    cd "$pkgdir"
+
+    _pick vkpfrost $libdir/libvulkan_panfrost.so
+    _pick vkpfrost usr/share/vulkan/icd.d/panfrost_icd.json
+
+    _pick vkdevice $libdir/libVkLayer_MESA_anti_lag.so
+    _pick vkdevice $libdir/libVkLayer_MESA_device_select.so
+    _pick vkdevice usr/share/vulkan/implicit_layer.d
+
+    # indirect rendering
+    ln -sr $libdir/libGLX_{mesa,indirect}.so.0
+  )
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-panfrost() {
+  pkgdesc="Open-source Vulkan driver for Mali GPUs (Omandroid: Mali-G710)"
+  depends=(
+    expat
+    glibc
+    libdisplay-info
+    libdrm
+    libgcc
+    libstdc++
+    libx11
+    libxcb
+    libxshmfence
+    spirv-tools
+    systemd-libs
+    vulkan-icd-loader
+    vulkan-mesa-implicit-layers
+    wayland
+    xcb-util-keysyms
+    zlib
+    zstd
+  )
+  optdepends=("vulkan-mesa-layers: additional vulkan layers")
+  provides=(vulkan-driver)
+
+  mv vkpfrost/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-mesa-implicit-layers() {
+  pkgdesc="Mesa's implicit Vulkan layers"
+  depends=(
+    glibc
+    libdrm
+    libxcb
+    wayland
+  )
+  conflicts=(vulkan-mesa-device-select)
+  replaces=(vulkan-mesa-device-select)
+
+  mv vkdevice/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+# vim:set sw=2 sts=-1 et:
