@@ -85,3 +85,4 @@ Made on the development laptop to give the phone internet over USB. Revert when 
   - `omandroid-setup-user` marks `welcome-keybindings-not-applicable`, which the upstream change honours: submitted as omacom/omarchy#15075 (https://github.com/omacom/omarchy/pull/15075). The patch in `patches/omarchy/0001-*` is applied on the phone as a bridge until it ships.
   - The setup script will become Omandroid's `setup-user` entrypoint in Omarchy's lifecycle-dispatch contract once a release includes it.
 - **Done: UTF-8 locale and timezone** via `omandroid-setup-system` (en_US.UTF-8; timezone from the host; NTP synced).
+- **USB doesn't reconnect after unplugging (2026-10-11).** The USB PHY forces VBUS valid at boot (no Type-C / MAX77759 TCPC driver yet), so the gadget never sees detach or attach. After an unplug, the link stays down until the next boot. Fixed properly by the MAX77759 TCPC + dwc3 role-switch work (plan: USB-C row).

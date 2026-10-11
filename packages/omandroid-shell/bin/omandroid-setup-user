@@ -28,3 +28,14 @@ fi
 if omarchy-done ensure omandroid-monitor-scale; then
   sed -i 's/^local omarchy_monitor_scale = .*/local omarchy_monitor_scale = 3/' ~/.config/hypr/monitors.lua
 fi
+
+# Touch phone: no pointer on screen (it still hides on touch if a USB mouse is
+# attached and the user turns it back on). Added once to the user's override
+# file, Omarchy's place for local Hyprland settings.
+if omarchy-done ensure omandroid-hide-cursor; then
+  cat >>~/.config/hypr/looknfeel.lua <<'LUA'
+
+-- Omandroid: a touch phone shows no pointer
+hl.config({ cursor = { invisible = true, hide_on_touch = true } })
+LUA
+fi
