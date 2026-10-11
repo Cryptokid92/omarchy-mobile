@@ -1,8 +1,9 @@
 # Omarchy phone profile
 
-The Omarchy shell on a phone: Omarchy's own Quickshell shell (unchanged) plus a
-phone profile (`profile/shell.json`) and phone plugins (`plugins/`), loaded
-like any third-party Omarchy plugin.
+The Omarchy shell on a phone: Omarchy's own Quickshell shell (unchanged) plus
+the phone plugins and profile, which now live in the `omandroid-shell` package
+(`packages/omandroid-shell`). This directory holds the desktop harness and
+screenshots.
 
 ## Develop on the desktop
 

@@ -6,7 +6,7 @@
 # markers, so the user's later changes are never overwritten.
 set -euo pipefail
 
-share=/usr/share/omandroid/phone
+share=/usr/share/omandroid/shell
 config=~/.config/omarchy
 
 # A phone has no keyboard-first workflow: skip Omarchy's "Learn Keybindings"

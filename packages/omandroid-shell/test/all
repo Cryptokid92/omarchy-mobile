@@ -1,0 +1,29 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Tests for omandroid-shell, from a copy of this directory alone.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
+
+for manifest in plugins/*/manifest.json; do
+  python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["id"].startswith("omandroid.")' "$manifest" \
+    || fail "$manifest is valid JSON with an omandroid.* id"
+done
+pass "plugin manifests are valid"
+
+python3 -c 'import json; json.load(open("profile/shell.json"))' || fail "profile/shell.json is valid JSON"
+pass "phone profile is valid"
+
+# Qt 6.12's QtQuick/Color shadows Omarchy's palette (omacom/omarchy#14553)
+if grep -rnE '(^|[^.[:alnum:]_])Color\.' plugins --include=*.qml; then
+  fail "palette references are qualified as Commons.Color"
+fi
+pass "palette references are qualified"
+
+bash -n bin/omandroid-setup-user || fail "omandroid-setup-user parses"
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+./install "$tmp/root"
+[[ -x $tmp/root/usr/bin/omandroid-setup-user && -f $tmp/root/usr/share/omandroid/shell/profile/shell.json ]] \
+  || fail "install stages the setup script and the profile"
+pass "install stages the package"

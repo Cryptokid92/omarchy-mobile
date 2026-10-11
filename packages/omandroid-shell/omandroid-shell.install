@@ -1,0 +1,3 @@
+post_install() {
+  echo "Run 'omandroid-setup-user' as each phone user (Omandroid's first run does this)."
+}

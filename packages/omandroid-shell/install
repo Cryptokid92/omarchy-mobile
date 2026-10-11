@@ -1,0 +1,13 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Stage omandroid-shell into DESTDIR. Never activates anything.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+destination=${1:?Usage: ./install DESTDIR}
+[[ $destination == /* && $destination != "/" ]] || { echo "Use an absolute staging directory" >&2; exit 1; }
+install -Dm755 bin/omandroid-setup-user "$destination/usr/bin/omandroid-setup-user"
+while IFS= read -r -d '' file; do
+  install -Dm644 "$file" "$destination/usr/share/omandroid/shell/$file"
+done < <(find plugins profile -type f -print0)
+install -Dm644 LICENSE "$destination/usr/share/licenses/omandroid-shell/LICENSE"
+install -Dm644 version "$destination/usr/share/omandroid/shell/version"
