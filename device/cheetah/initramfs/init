@@ -211,6 +211,35 @@ say "ready"
 
 
 # Keep a shell on the screen too
+# Hand over to Arch on userdata, unless omandroid.initramfs is on the command
+# line. Everything is checked before the irreversible exec; if anything is
+# missing we stay here in the initramfs shell.
+boot_arch() {
+  grep -q omandroid.initramfs /proc/cmdline && return 1
+  local dev="" s
+  for s in /sys/block/sda/sda*; do
+    grep -qx PARTNAME=userdata "$s/uevent" 2>/dev/null && dev=/dev/${s##*/}
+  done
+  [ -n "$dev" ] || { say "arch: no userdata partition"; return 1; }
+  [ "$(cat /sys/block/sda/${dev#/dev/}/ro)" = 0 ] || { say "arch: userdata is read-only"; return 1; }
+  mkdir -p /newroot
+  e2fsck -p "$dev" >/dev/null 2>&1
+  mount -t ext4 -o rw,relatime "$dev" /newroot || { say "arch: cannot mount $dev"; return 1; }
+  if [ ! -x /newroot/usr/lib/systemd/systemd ]; then
+    say "arch: no systemd on $dev"; umount /newroot; return 1
+  fi
+  say "arch: switching to Arch Linux on $dev"
+  # Stop the initramfs helpers (dropbear, udhcpd, guards); the kernel keeps
+  # the USB gadget and the partition read-only flags across the switch
+  kill -9 -1 2>/dev/null
+  sleep 1
+  for m in /dev /proc /sys /run; do
+    mkdir -p "/newroot$m" && mount --move "$m" "/newroot$m"
+  done
+  exec switch_root /newroot /usr/lib/systemd/systemd
+}
+boot_arch
+
 # PID 1 must never exit: if it does the kernel panics and freezes (silently,
 # since ABL sets console=null). So keep a shell on the screen in a loop
 # instead of exec'ing one. setsid -c makes tty1 its controlling terminal

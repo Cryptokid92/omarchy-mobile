@@ -110,7 +110,7 @@ cmd_initramfs() {
   rm -rf "$stage" && mkdir -p "$stage"
   tar -xzf "$dl/$tarball" -C "$stage"
   local apk
-  for apk in $(python3 -I "$ROOT/tools/alpine-fetch.py" "$ver" "$dl/apks" dropbear kexec-tools); do
+  for apk in $(python3 -I "$ROOT/tools/alpine-fetch.py" "$ver" "$dl/apks" dropbear kexec-tools e2fsprogs); do
     tar -xzf "$apk" -C "$stage" --exclude='.PKGINFO' --exclude='.SIGN.*' --exclude='.*.sh' 2>/dev/null || true
   done
   install -m 755 "$ROOT/device/cheetah/initramfs/init" "$stage/init"
@@ -262,7 +262,7 @@ cmd_push() {
   for p in boot init_boot vendor_boot vendor_kernel_boot dtbo; do
     [[ -f "$img/$p.img" ]] || die "missing $img/$p.img (run: omandroid images)"
     # Find the partition by GPT name; the init guard leaves only these writable
-    dev=$("$ssh" "for s in /sys/block/sda/sda*; do grep -qx 'PARTNAME=${p}_b' \$s/uevent && echo /dev/\${s##*/}; done")
+    dev=$("$ssh" "for s in /sys/block/sda/sda*; do grep -qx 'PARTNAME=${p}_b' \$s/uevent && echo /dev/\${s##*/}; done; true")
     [[ -n "$dev" ]] || die "${p}_b not found on the phone"
     [[ "$("$ssh" "cat /sys/block/sda/${dev#/dev/}/ro")" == 0 ]] || die "$dev (${p}_b) is read-only; refusing"
     "$ssh" "dd of=$dev bs=1M conv=fsync 2>/dev/null" < "$img/$p.img"
