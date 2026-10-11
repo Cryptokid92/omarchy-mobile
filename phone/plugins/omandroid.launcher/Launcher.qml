@@ -29,7 +29,7 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string pluginId: (manifest && manifest.id) || "omarchy-mobile.launcher"
+  readonly property string pluginId: (manifest && manifest.id) || "omandroid.launcher"
   readonly property var appLibrary: shell && shell.appLibrary ? shell.appLibrary : localLibrary.item
 
   // The host hands its application library only to `menu` plugins, and in
@@ -128,7 +128,7 @@ Item {
 
   // ---------------------------------------------------------------- lifecycle
 
-  // `shell summon omarchy-mobile.launcher '{"query":"..."}'` opens the
+  // `shell summon omandroid.launcher '{"query":"..."}'` opens the
   // drawer, optionally pre-filled.
   function open(payloadJson) {
     var payload = ({})
@@ -155,7 +155,7 @@ Item {
     else open("{}")
   }
 
-  // `shell call omarchy-mobile.launcher <method> <arg>` entry points.
+  // `shell call omandroid.launcher <method> <arg>` entry points.
   function search(text) {
     if (!opened) expand()
     query = String(text || "")
@@ -200,7 +200,7 @@ Item {
       implicitHeight: root.dockHeight
       exclusionMode: ExclusionMode.Auto
       color: Color.bar.background
-      WlrLayershell.namespace: "omarchy-mobile-dock"
+      WlrLayershell.namespace: "omandroid-dock"
       WlrLayershell.layer: WlrLayer.Top
 
       SearchPill {
@@ -222,7 +222,7 @@ Item {
     margins.top: root.barSize
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
-    WlrLayershell.namespace: "omarchy-mobile-launcher"
+    WlrLayershell.namespace: "omandroid-launcher"
     WlrLayershell.layer: WlrLayer.Top
     WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 

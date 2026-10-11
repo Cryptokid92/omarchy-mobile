@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy-mobile.quicksettings",
+  "id": "omandroid.quicksettings",
   "name": "Mobile quick settings",
   "version": "0.1.0",
-  "author": "Omarchy Mobile",
+  "author": "Omandroid",
   "license": "MIT",
   "description": "Pull-down quick settings sheet for the phone: touch-sized toggles for Wi-Fi, Bluetooth, mobile data, rotation lock, torch and do-not-disturb, plus brightness and volume sliders.",
   "kinds": ["panel"],

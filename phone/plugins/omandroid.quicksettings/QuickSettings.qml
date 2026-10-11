@@ -27,7 +27,7 @@ Item {
   property var manifest: null
 
   property bool opened: false
-  readonly property string pluginId: (manifest && manifest.id) || "omarchy-mobile.quicksettings"
+  readonly property string pluginId: (manifest && manifest.id) || "omandroid.quicksettings"
 
   // ---------------------------------------------------------------- lifecycle
 
@@ -48,7 +48,7 @@ Item {
     else close()
   }
 
-  // `shell call omarchy-mobile.quicksettings state` for scripts and tests.
+  // `shell call omandroid.quicksettings state` for scripts and tests.
   function state() {
     return JSON.stringify({
       opened: opened,
@@ -60,7 +60,7 @@ Item {
     })
   }
 
-  // `shell call omarchy-mobile.quicksettings toggleTile <name>`: the same
+  // `shell call omandroid.quicksettings toggleTile <name>`: the same
   // action as tapping a tile. Returns the new state() or "unknown".
   function toggleTile(name) {
     var tilesByName = {
@@ -327,7 +327,7 @@ Item {
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.namespace: "omarchy-mobile-quicksettings"
+    WlrLayershell.namespace: "omandroid-quicksettings"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 

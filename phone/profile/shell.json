@@ -8,12 +8,12 @@
     "omarchy.idle"
   ],
   "bar": {
-    "id": "omarchy-mobile.bar",
+    "id": "omandroid.bar",
     "position": "top",
     "transparent": false,
     "clockFormat": "HH:mm",
     "showBatteryPercent": true,
-    "quickSettings": "omarchy-mobile.quicksettings",
+    "quickSettings": "omandroid.quicksettings",
     "layout": {
       "left": [],
       "center": [],
@@ -22,10 +22,10 @@
   },
   "plugins": [
     {
-      "id": "omarchy-mobile.quicksettings"
+      "id": "omandroid.quicksettings"
     },
     {
-      "id": "omarchy-mobile.launcher"
+      "id": "omandroid.launcher"
     }
   ]
 }

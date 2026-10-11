@@ -8,7 +8,7 @@ function isPlainObject(value) {
 }
 
 // Manifest defaults, overlaid with the plugin's entry in shell.json
-// (`plugins: [{ "id": "omarchy-mobile.launcher", "agentName": "Codex", ... }]`).
+// (`plugins: [{ "id": "omandroid.launcher", "agentName": "Codex", ... }]`).
 function mergedSettings(defaults, config, pluginId) {
   var out = {}
   var base = isPlainObject(defaults) ? defaults : {}

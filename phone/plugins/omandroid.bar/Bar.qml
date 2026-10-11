@@ -48,7 +48,7 @@ Item {
 
   readonly property string clockFormat: String(setting("clockFormat", "HH:mm"))
   readonly property bool showBatteryPercent: setting("showBatteryPercent", true) !== false
-  readonly property string quickSettingsId: String(setting("quickSettings", "omarchy-mobile.quicksettings"))
+  readonly property string quickSettingsId: String(setting("quickSettings", "omandroid.quicksettings"))
 
   // A full bar may read the notification service's do-not-disturb state
   // through the host's narrow proxy.
@@ -120,9 +120,9 @@ Item {
   }
 
   // Edge-swipe gestures and hardware keys reach the sheet through here, e.g.
-  // `omarchy-shell omarchy-mobile.bar pullDown` from a Hyprland gesture bind.
+  // `omarchy-shell omandroid.bar pullDown` from a Hyprland gesture bind.
   IpcHandler {
-    target: "omarchy-mobile.bar"
+    target: "omandroid.bar"
 
     function pullDown(): string {
       root.openQuickSettings()

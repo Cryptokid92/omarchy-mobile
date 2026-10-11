@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: MIT -->
-# Omarchy Mobile plugins
+# Omandroid plugins
 
 Phone surfaces for Omarchy's own shell, written as ordinary third-party
 Omarchy plugins. Nothing in Omarchy is patched: each directory here is a
@@ -13,9 +13,9 @@ logical at scale 3).
 
 | Plugin | Kind | What it is |
 | --- | --- | --- |
-| `omarchy-mobile.bar` | `bar` | Status bar: clock, connectivity, battery; tap or pull down for quick settings |
-| `omarchy-mobile.quicksettings` | `panel` (keepLoaded) | Pull-down sheet: six toggle tiles, brightness and volume |
-| `omarchy-mobile.launcher` | `panel` (keepLoaded) | Home bar: app search, app grid and coding-agent prompt in one input |
+| `omandroid.bar` | `bar` | Status bar: clock, connectivity, battery; tap or pull down for quick settings |
+| `omandroid.quicksettings` | `panel` (keepLoaded) | Pull-down sheet: six toggle tiles, brightness and volume |
+| `omandroid.launcher` | `panel` (keepLoaded) | Home bar: app search, app grid and coding-agent prompt in one input |
 | lockpad | none | Not built; see [Lock screen](#lock-screen-pin-pad) for why and what upstream needs |
 
 ## Enabling
@@ -24,11 +24,11 @@ logical at scale 3).
 
 ```json
 {
-  "bar": { "id": "omarchy-mobile.bar", "clockFormat": "HH:mm", "showBatteryPercent": true,
-           "quickSettings": "omarchy-mobile.quicksettings" },
+  "bar": { "id": "omandroid.bar", "clockFormat": "HH:mm", "showBatteryPercent": true,
+           "quickSettings": "omandroid.quicksettings" },
   "plugins": [
-    { "id": "omarchy-mobile.quicksettings" },
-    { "id": "omarchy-mobile.launcher" }
+    { "id": "omandroid.quicksettings" },
+    { "id": "omandroid.launcher" }
   ]
 }
 ```
@@ -38,7 +38,7 @@ means "act immediately" to that service, not "never", so the old profile ran
 the screensaver and `omarchy-system-lock` the moment the session went idle.
 The phone has no touch lock yet (below), so idle stays off for now.
 
-## omarchy-mobile.bar
+## omandroid.bar
 
 A full bar that replaces `omarchy.bar`. It is 44 px tall (or the theme's bar
 size if larger), anchored to the top, and reserves its height so windows tile
@@ -60,13 +60,13 @@ Settings live on the `bar` object in `shell.json`:
 | --- | --- | --- |
 | `clockFormat` | `"HH:mm"` | Qt date format |
 | `showBatteryPercent` | `true` | |
-| `quickSettings` | `"omarchy-mobile.quicksettings"` | Plugin id the bar opens |
+| `quickSettings` | `"omandroid.quicksettings"` | Plugin id the bar opens |
 
 **Stubbed:** cellular signal. `Quickshell.Networking` has no modem backend and
 the Pixel 7 Pro modem has no mainline driver, so `cellular.available` is
 hard-wired to `false` and the icon never renders.
 
-IPC (`omarchy-shell omarchy-mobile.bar <method>`), for edge-swipe gestures or
+IPC (`omarchy-shell omandroid.bar <method>`), for edge-swipe gestures or
 hardware keys:
 
 | Method | Effect |
@@ -74,7 +74,7 @@ hardware keys:
 | `pullDown` | Open quick settings |
 | `toggleQuickSettings` | Open or close it |
 
-## omarchy-mobile.quicksettings
+## omandroid.quicksettings
 
 A sheet that slides down from the top edge over the status bar, styled as an
 Omarchy popup (popups background and border). It has a clock and date header,
@@ -101,12 +101,12 @@ IPC:
 
 | Call | Effect |
 | --- | --- |
-| `omarchy-shell shell toggle omarchy-mobile.quicksettings '{}'` | Open or close |
-| `omarchy-shell shell summon omarchy-mobile.quicksettings '{}'` / `hide omarchy-mobile.quicksettings` | Open / close |
-| `omarchy-shell shell call omarchy-mobile.quicksettings state ''` | JSON: open state, Wi-Fi, Bluetooth, DND, brightness, volume |
-| `omarchy-shell shell call omarchy-mobile.quicksettings toggleTile <name>` | Same as tapping a tile. Names: `wifi`, `bluetooth`, `mobile-data`, `rotation-lock`, `torch`, `dnd`. Returns the new state, `unavailable` or `unknown` |
+| `omarchy-shell shell toggle omandroid.quicksettings '{}'` | Open or close |
+| `omarchy-shell shell summon omandroid.quicksettings '{}'` / `hide omandroid.quicksettings` | Open / close |
+| `omarchy-shell shell call omandroid.quicksettings state ''` | JSON: open state, Wi-Fi, Bluetooth, DND, brightness, volume |
+| `omarchy-shell shell call omandroid.quicksettings toggleTile <name>` | Same as tapping a tile. Names: `wifi`, `bluetooth`, `mobile-data`, `rotation-lock`, `torch`, `dnd`. Returns the new state, `unavailable` or `unknown` |
 
-## omarchy-mobile.launcher
+## omandroid.launcher
 
 The home surface, after Omalauncher: one bar along the bottom of the screen.
 
@@ -132,7 +132,7 @@ Settings: defaults are in `manifest.json` under `settings.defaults`; override
 any of them on the plugin's entry in `shell.json`, which the launcher watches:
 
 ```json
-{ "id": "omarchy-mobile.launcher", "agentName": "Codex", "agentCommand": ["codex"],
+{ "id": "omandroid.launcher", "agentName": "Codex", "agentCommand": ["codex"],
   "agentIcon": "shell/plugins/agents/assets/codex.svg" }
 ```
 
@@ -149,11 +149,11 @@ IPC:
 
 | Call | Effect |
 | --- | --- |
-| `omarchy-shell shell summon omarchy-mobile.launcher '{"query":"fix the tests"}'` | Open the drawer, optionally pre-filled |
-| `omarchy-shell shell hide omarchy-mobile.launcher` | Close the drawer (the dock stays) |
-| `omarchy-shell shell call omarchy-mobile.launcher search <text>` | Open and type; returns the mode (`apps`/`agent`) and the top app ids |
-| `omarchy-shell shell call omarchy-mobile.launcher ask <prompt>` | Ask the agent directly |
-| `omarchy-shell shell call omarchy-mobile.launcher state ''` | JSON: open state, query, mode, app count, agent argv |
+| `omarchy-shell shell summon omandroid.launcher '{"query":"fix the tests"}'` | Open the drawer, optionally pre-filled |
+| `omarchy-shell shell hide omandroid.launcher` | Close the drawer (the dock stays) |
+| `omarchy-shell shell call omandroid.launcher search <text>` | Open and type; returns the mode (`apps`/`agent`) and the top app ids |
+| `omarchy-shell shell call omandroid.launcher ask <prompt>` | Ask the agent directly |
+| `omarchy-shell shell call omandroid.launcher state ''` | JSON: open state, query, mode, app count, agent argv |
 
 ## Testing in the desktop harness
 
