@@ -57,3 +57,10 @@ Mainline v7.3-rc6 boots from slot B, with all 8 CPUs, 11.5 GB of RAM, USB networ
 
 - **NetworkManager profile `omandroid-phone`** gives `172.16.42.2/24` on any `enp0s20f0u*` gadget link. Without it, NM tears the link down after DHCP fails.
 - **`tools/phone-ssh`** runs commands on the phone. dropbear has no scp/sftp server, so stream files with `ssh 'cat > file' < file`.
+
+## Host changes to undo later
+
+Made on the development laptop to give the phone internet over USB. Revert when no longer needed:
+
+- **ufw forwarding for the phone's USB link** (added 2026-10-11): `sudo ufw route allow in on enp0s20f0u2`. Undo with `sudo ufw route delete allow in on enp0s20f0u2`.
+- **NetworkManager profile `omandroid-phone`** set to `ipv4.method shared` (NAT for the phone). Undo with `nmcli con modify omandroid-phone ipv4.method manual`, or remove the profile: `nmcli con delete omandroid-phone`.
