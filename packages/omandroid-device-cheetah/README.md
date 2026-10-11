@@ -11,6 +11,7 @@ Omandroid's system support for the Google Pixel 7 Pro (codename cheetah, Tensor 
 | `vendor/udev/rules.d/10-omandroid-storage.rules` | `/usr/lib/udev/rules.d` | Continues the initramfs storage guard: Android partitions stay hidden and the whole-disk node unusable |
 | `vendor/systemd/network/20-usb-gadget.network` | `/usr/lib/systemd/network` | USB networking to a host (172.16.42.1) |
 | `vendor/NetworkManager/conf.d/10-omandroid-usb.conf` | `/usr/lib/NetworkManager/conf.d` | Keeps NetworkManager off the USB link |
+| `vendor/systemd/logind.conf.d/10-omandroid-power-key.conf` | `/usr/lib/systemd/logind.conf.d` | A short power press opens the system menu instead of powering off |
 
 `./build [DIR]` compiles the C tools, `./install DESTDIR [DIR]` stages everything and enables nothing, and `test/all` runs the package tests.
 

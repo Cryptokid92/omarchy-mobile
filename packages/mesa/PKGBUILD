@@ -137,6 +137,8 @@ build() {
     -D microsoft-clc=disabled
     -D valgrind=disabled
     -D video-codecs=all
+    # VA-API needs a desktop gallium driver (r600, radeonsi, nouveau, virgl)
+    -D gallium-va=disabled
     -D vulkan-drivers=panfrost
     -D vulkan-layers=device-select,anti-lag
     -D vulkan-loader-rpath=
@@ -181,10 +183,9 @@ package_mesa() {
   optdepends=("opengl-man-pages: for the OpenGL API man pages")
   # Same provides/conflicts/replaces as Arch, so this is a drop-in
   # replacement for the distribution package.
+  # Arch's provides, minus the VA-API driver this build doesn't include
   provides=(
-    "libva-mesa-driver=$epoch:$pkgver-$pkgrel"
     "mesa-libgl=$epoch:$pkgver-$pkgrel"
-    libva-driver
     opengl-driver
   )
   conflicts=(
