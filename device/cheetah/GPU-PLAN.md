@@ -1,6 +1,6 @@
 # GPU acceleration plan: Mali-G710 on Panthor + Mesa (cheetah / gs201)
 
-Status: plan only. No kernel code was changed. Written 2026-10-11 against
+Status: G0 (offline prep) done, see "G0 status" at the end; G1 onward not started. Written 2026-10-11 against
 `omandroid` @ `cbde67d76` (Linux 7.3-rc6), Arch `mesa 1:26.2.4-1`,
 `linux-firmware-other 20260916-1`.
 
@@ -300,13 +300,13 @@ try it with Panthor.
 gpu_clk_stub: clock-gpu-stub {
 	compatible = "fixed-clock";
 	#clock-cells = <0>;
-	clock-frequency = <400000000>;	/* nominal; hardware runs at ABL's rate */
+	clock-frequency = <151000000>;	/* ECT boot level, see G0 status */
 	clock-output-names = "gpu-stub";
 };
 
 gpu_opp_table: opp-table-gpu {
 	compatible = "operating-points-v2";
-	opp-400000000 { opp-hz = /bits/ 64 <400000000>; };	/* = stub rate */
+	opp-151000000 { opp-hz = /bits/ 64 <151000000>; };	/* = stub rate */
 };
 
 /* in soc { } */
@@ -420,7 +420,7 @@ How to ship:
 Rules for every step:
 
 - The panthor module is **blacklisted from autoload**
-  (`/etc/modprobe.d/omandroid-gpu.conf: blacklist panthor`) and only loaded by
+  (`/etc/modprobe.d/omandroid-panthor.conf: blacklist panthor`) and only loaded by
   hand over SSH, so a failure costs at most one reboot.
 - `panic=10` and ABL A/B fallback are the recovery path
   (`device/cheetah/NOTES.md`).
@@ -442,7 +442,7 @@ Rules for every step:
 - `modprobe panthor` over SSH while watching `dmesg -w` on a second SSH
   session.
 - **Expected:** `Mali-G710 id 0xa862 major 0x0 minor 0x0 status 0x4`,
-  `shader_present` (MC7 mask), "clock rate = 400000000", a CSF firmware
+  `shader_present` (MC7 mask), "clock rate = 151000000", a CSF firmware
   interface version, and `/dev/dri/renderD128` + `card1`.
 - **Failure modes:**
   - SError/reboot on the first register read: G3D is not powered or clocked
@@ -546,3 +546,103 @@ power management takes another 2–3 weeks.
 7. **SLC/MGM, protected memory and the priority manager** (`gs201-gpu.dtsi:10-48`)
    are kbase-only Pixel features. Panthor ignores them, which costs some
    performance but is not a correctness problem.
+
+---
+
+## G0 status (2026-10-11, offline; nothing was run on the phone)
+
+### Kernel: `omandroid-gpu` in `wt-gpu`, rebased onto `omandroid` @ `1f151cd80` (touch included)
+
+- `b7b9b8bf3` dt-bindings: gpu: mali-valhall-csf: add the `google,gs201-mali` compatible.
+  No SoC-specific constraints. `dt-doc-validate` passes.
+- `121b584c2` gs201.dtsi: `gpu@28000000` (disabled), with `reg`, the
+  `job/mmu/gpu` IRQs 329/330/328, and a `core` clock from the `clock-gpu`
+  fixed clock. One-entry `opp-table-gpu`. No `power-domains`, no
+  `mali-supply` (the reasons are in a comment and the commit message).
+- `1f1b44ac6` gs201-cheetah: `&gpu { status = "okay"; }`.
+- `dt-validate` of `gs201-cheetah.dtb` against the tree's bindings reports
+  nothing for the GPU nodes. The only finding is the existing `soc_id`
+  property, which has no schema.
+- `CONFIG_DRM_PANTHOR=m`. The module's `.modinfo` lists
+  `arm/mali/arch10.8/mali_csffw.bin`. It depends on the modules `drm_exec`,
+  `gpu-sched` and `drm_gpuvm`.
+
+**Why 151 MHz.** The phone's own bl2 partition (backup
+`cheetah-partition-backup-20261011/bl2_a.img` @ `0x60000`) holds the ECT
+blob (`PARA` version 0042, the same version stock prints). Parsing it with
+the layout from Google's `ect_parser.c` gives:
+
+- DVFS domains `G3D` (848…151 MHz) and `G3DL2` (996…151 MHz). Both have
+  `boot_level_idx = -1`, so the boot rate comes from the GEN table instead.
+- GEN `MINMAX_G3D` / `MINMAX_G3DL2`: boot = resume = **151 MHz** for every
+  ASV group (columns `asv_fusing, asv_table, min, max, boot, resume`;
+  `vclk.c` reads `MINMAX_BOOT_FREQ`).
+
+The factory bootloader `cp2a.260705.006` contains the same table.
+
+This is the rate the firmware declares as the boot level. Whether ABL
+actually leaves G3D at that rate will be confirmed in G4a, when the ACPM
+`get_rate` call is implemented. A 151 MHz fixed clock is safe either way:
+the OPP equals the clock, so devfreq never calls a real `set_rate`. The
+only side effect is that Panthor's `fast_rate` and devfreq statistics
+assume 151 MHz.
+
+The parser script is not in the repo. It is about 50 lines of Python
+following `ect_parser.c`; rewrite it if it's needed again.
+
+### Userspace and tooling (omandroid repo)
+
+- `device/cheetah/rootfs/etc/modprobe.d/omandroid-panthor.conf`: `blacklist panthor`.
+  This stops udev's modalias autoload. An explicit `modprobe panthor` still
+  works.
+- `bin/omandroid modules`: runs `modules_install` with `INSTALL_MOD_STRIP=1`
+  and packs the result as `$KERNEL_OUT/modules-<release>.tar.zst` (paths
+  `<release>/…`, 1680 modules, 16 MB). The container has no depmod, so
+  `depmod` runs on the phone.
+- `bin/omandroid modules-push`: streams that tarball into
+  `/usr/lib/modules/<release>` over SSH, swapping the tree atomically, then
+  runs `depmod -a <release>`. Written but **not run yet**.
+- Fixed `omandroid images`: `grep -q` under `pipefail` SIGPIPEd dtc once
+  the DTB grew, and that produced a false "soc_id rewrite failed".
+- `packages/mesa/`: the G710 patch, a trimmed aarch64 PKGBUILD from Arch
+  `1-26.2.4-1`, plus `README.md` and `UPSTREAM.md`. Verified so far:
+  - the tarball's checksums and signature;
+  - `makepkg --nobuild` (the patch applies), and `patch --dry-run` passes as well;
+  - the patch also applies to Mesa `main` with fuzz 2.
+
+  It has **not been built**; the build happens natively on the phone.
+
+Images for G1 are built in `~/android/mainline/out-gpu/images`. Kernel
+release: `7.3.0-rc6-omandroid-push1-00032-g1f1b44ac61b9`.
+
+### G1 runbook (run from the omandroid repo, phone in Arch over USB)
+
+```sh
+export KERNEL_OUT=$HOME/android/mainline/out-gpu
+# 1. blacklist first, so the new DTB cannot autoload panthor
+tools/phone-ssh 'mkdir -p /etc/modprobe.d && cat > /etc/modprobe.d/omandroid-panthor.conf' \
+  < device/cheetah/rootfs/etc/modprobe.d/omandroid-panthor.conf
+# 2. modules for the new kernel (installed alongside the running one)
+bin/omandroid modules-push
+# 3. write slot B and reboot into it
+bin/omandroid push
+# 4. G0 pass check
+tools/phone-ssh 'uname -r; ls -d /sys/bus/platform/devices/28000000.gpu; \
+  lsmod | grep -c panthor; ls -l /usr/lib/firmware/arm/mali/arch10.8/'
+# 5. G1: watch the log in one terminal, load the driver in another
+tools/phone-ssh dmesg -w
+tools/phone-ssh modprobe panthor
+tools/phone-ssh 'ls -l /dev/dri; cat /sys/class/devfreq/*/cur_freq'
+```
+
+For the upstream Mesa MR, record the `core_features` low byte (the Mesa
+`gpu_variant`). If Mesa reports "Unknown gpu_id … variant N" with
+`N != 0`, change the patch to use that `N`.
+
+### Open questions
+
+- **Whether G3D is really on and clocked at handoff.** Unverified; G1 tests it.
+- **Whether the generic arch10.8 CSF firmware boots on G710 r0p0.** Unverified.
+- **Whether the "stacks"/"coregroup" CMU_G3D gates could be off** while
+  the "core" gate is on. The Q-channel should keep them running. If the MCU
+  times out, this is the first suspect.
