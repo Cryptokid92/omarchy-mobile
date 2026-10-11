@@ -2,6 +2,14 @@
 
 Findings from real hardware, newest first. `BRINGUP-M1.md` is the research map written before first boot.
 
+## 2026-10-11: lost USB for an hour (our bug, not hardware)
+
+- **Symptom:** USB enumerated, then bulk transfers stalled after a few seconds ("transmit queue timed out" on the host, then "not responding to setup address" on re-enumeration). Background jobs with `sleep` never finished.
+- **Cause:** init ended with `exec setsid cttyhack sh ...`, and Alpine's busybox has no `cttyhack`. The exec failed, PID 1 exited, and the kernel panicked. The panic never showed, because ABL appends `console=null`.
+- **Fix:** PID 1 never exits: it keeps the screen shell in a `while true` loop, using `setsid -c` for the controlling tty. The DTB bootargs carry `panic=10`, so any future panic reboots instead of freezing. After a few failed boots ABL falls back to stock slot A, where `adb reboot bootloader` reaches fastboot.
+- **Ruled out along the way:** the gs201 clock driver, the host port, PMU state, and the HSI0 S2MPU firewall. On a non-pKVM boot, `S2MPU_HSI0` (0x11070000) reads `CTRL0` = 0, i.e. already disabled. Note for later: shipping needs real S2MPU programming for DMA protection.
+- **`reboot-to bootloader` is unreliable.** syscon-reboot-mode binds to the PMU, but ABL usually ignores the reason. The one success may have coincided with the buttons being held. Open.
+
 ## 2026-10-11: M1 first light
 
 Mainline v7.3-rc6 boots from slot B, with all 8 CPUs, 11.5 GB of RAM, USB networking and SSH at `172.16.42.1`, and a readable console on the panel.
@@ -13,6 +21,8 @@ Mainline v7.3-rc6 boots from slot B, with all 8 CPUs, 11.5 GB of RAM, USB networ
 - **Slot B fallback works.** Our Linux never marks the slot successful, so after its retries ABL boots stock slot A. From slot A, `adb reboot bootloader` reaches fastboot without buttons.
 - **The unlocked-warning screen is not fastboot.** Pausing it doesn't expose fastboot over USB. Real fastboot is reached by holding Volume Down through the restart, until the "Fastboot Mode / Start" screen appears.
 - **After a forced reset out of our Linux,** fastboot sometimes doesn't enumerate on USB.
+- **Reaching fastboot by hand, as it works on this phone:** hold Power about 30 s until fully off. Then hold Volume Down, add Power, and keep both held about 20 s until the "Fastboot Mode" screen with "Start" appears. Letting go early lands on the unlocked-warning screen, which carries on booting slot B.
+- **From a working Linux,** `reboot-to bootloader` (in the initramfs) reaches fastboot in about 2 s. It uses `LINUX_REBOOT_CMD_RESTART2` so syscon-reboot-mode stores 0xfc in SYSIP_DAT0 through the PMU regmap. Plain busybox `reboot` hangs.
 
 ### Display
 

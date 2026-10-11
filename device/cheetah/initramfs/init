@@ -82,7 +82,52 @@ mkdir -p /etc/dropbear
 dropbear -R -E -p 22 2>/dev/null && say "ssh: root@172.16.42.1"
 ( while true; do setsid getty -n -l /bin/sh 115200 ttyGS0 vt100; sleep 1; done ) &
 
+# Bring-up diagnostics, printed synchronously (no sleep, so they show even
+# if timer interrupts are broken): USB log lines, whether interrupts arrive,
+# and what the bootloader passed in.
+{
+  echo "--- usb/phy/dwc3 ---"
+  dmesg | grep -iE 'dwc3|phy|udc|gadget|11210000|pmu' | tail -14
+  echo "--- interrupts (timer, usb) at two points ---"
+  grep -iE 'arch_timer|dwc3|11210000' /proc/interrupts | cut -c1-90
+  i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done
+  grep -iE 'arch_timer|dwc3|11210000' /proc/interrupts | cut -c1-90
+  echo "--- uptime $(cut -d' ' -f1 /proc/uptime), udc $(cat /sys/class/udc/*/state 2>/dev/null) ---"
+  echo "--- cmdline tail ---"
+  tr ' ' '\n' < /proc/cmdline | tail -12 | tr '\n' ' '
+  echo
+} > /dev/tty0 2>&1
+
 say "ready"
+
+# Self-recovery for bring-up: if the host never configures the USB gadget,
+# show why on screen, then return to fastboot by ourselves.
+(
+  for i in $(seq 1 45); do
+    grep -qx configured /sys/class/udc/*/state 2>/dev/null && exit 0
+    sleep 1
+  done
+  {
+    echo
+    echo "=== USB never configured; dmesg follows ==="
+    dmesg | grep -iE 'dwc3|phy|usb|udc|clk|error|fail' | tail -30
+    echo "omarchy-mobile: no USB host, rebooting to fastboot in 20 s"
+  } > /dev/tty0
+  sleep 20
+  sync
+  reboot-to bootloader
+) &
+
+
+
+
+
 # Keep a shell on the screen too
-# cttyhack gives the shell tty1 as its controlling terminal (job control)
-exec setsid cttyhack sh -c 'exec sh </dev/tty1 >/dev/tty1 2>&1'
+# PID 1 must never exit: if it does the kernel panics and freezes (silently,
+# since ABL sets console=null). So keep a shell on the screen in a loop
+# instead of exec'ing one. setsid -c makes tty1 its controlling terminal
+# (Alpine's busybox has no cttyhack; exec'ing it is what killed PID 1).
+while true; do
+  setsid -c sh </dev/tty1 >/dev/tty1 2>&1
+  sleep 1
+done

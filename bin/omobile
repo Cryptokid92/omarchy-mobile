@@ -123,6 +123,9 @@ cmd_initramfs() {
   "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
     -o "$stage/usr/local/bin/devmem" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
     "$ROOT/tools/devmem.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
+  "$CLANG_DIR/bin/clang" --target=aarch64-linux-musl --sysroot="$sysroot" -fuse-ld=lld -static -nostdlib -O2 \
+    -o "$stage/usr/local/bin/reboot-to" "$sysroot/usr/lib/crt1.o" "$sysroot/usr/lib/crti.o" \
+    "$ROOT/tools/reboot-to.c" -L"$sysroot/usr/lib" -lc "$builtins" "$sysroot/usr/lib/crtn.o"
   mkdir -p "$stage/root/.ssh"
   cat "$HOME"/.ssh/*.pub > "$stage/root/.ssh/authorized_keys"
   chmod 700 "$stage/root/.ssh" && chmod 600 "$stage/root/.ssh/authorized_keys"
