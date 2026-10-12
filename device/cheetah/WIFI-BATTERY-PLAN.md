@@ -646,7 +646,8 @@ Kernel branch `omandroid-pcie` in `/home/raven/android/mainline/wt-pcie`
 | `edd3a2137` arm64: dts: exynos: google: gs201-cheetah: wire up the BCM4389 Wi-Fi | WL_REG_ON regulator, root port + `wifi@0,0`, pins, `wifi_dma_pool` (**disabled**) |
 
 omandroid repo: `kernel/configs/omandroid.config` (`PCIE_GS201=m`,
-`PHY_GS201_PCIE=m`, `PCI_PWRCTRL_GENERIC=m`, `DMA_RESTRICTED_POOL=y`),
+`PHY_GS201_PCIE=m`, `PCI_PWRCTRL_GENERIC=y` (built in anyway: the arm64
+defconfig's `PCIE_QCOM` selects it), `DMA_RESTRICTED_POOL=y`),
 `device/cheetah/overlays/wifi-pcie-test.dtso` and `wifi-dma-pool-test.dtso`
 (the explicit enable steps), and `packages/omandroid-device-cheetah/vendor/modprobe.d/omandroid-wifi.conf`
 (blacklists `pcie_gs201` and `brcmfmac`).
@@ -815,9 +816,10 @@ tools/phone-ssh 'devmem 0x145202c8'    # ELBI LTSSM: expect 0x0 (not 0x11)
 #       (bin/omandroid kernel also rebuilds the DTB without the overlay)
 
 # W1.3  train the link, by hand
-tools/phone-ssh 'modprobe pci-pwrctrl-generic &&
+tools/phone-ssh 'modprobe phy_gs201_pcie &&
   echo "module pcie_gs201 +p; module phy_gs201_pcie +p" > /sys/kernel/debug/dynamic_debug/control &&
   modprobe pcie_gs201 && sleep 1 && lspci -nn'
+#       (the pwrctrl "slot" driver that switches WL_REG_ON is built in: arm64 defconfig)
 #       pass: "PCIe Gen.2 x1 link up" (Gen.1 is acceptable for W1, note it),
 #             0000:00:00.0 [144d:eced] bridge, 0000:01:00.0 [14e4:4441] network,
 #             BAR0 64K and BAR2 4M assigned (stock: R/dmesg.txt:5461-5470)
