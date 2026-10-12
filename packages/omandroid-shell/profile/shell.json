@@ -1,12 +1,5 @@
 {
   "version": 1,
-  "idle": {
-    "screensaver": 0,
-    "lock": 0
-  },
-  "disabledPlugins": [
-    "omarchy.idle"
-  ],
   "bar": {
     "id": "omandroid.bar",
     "position": "top",
@@ -26,6 +19,9 @@
     },
     {
       "id": "omandroid.launcher"
+    },
+    {
+      "id": "omandroid.switcher"
     }
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "omandroid.switcher",
+  "name": "App switcher",
+  "version": "0.1.0",
+  "author": "Omandroid",
+  "license": "MIT",
+  "description": "Android-style recent apps: swipe up from the dock to see open windows as cards. Tap one to switch to it, flick it up to close it, or go home.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Switcher.qml"
+  }
+}
