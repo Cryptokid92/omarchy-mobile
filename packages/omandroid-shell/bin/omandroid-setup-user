@@ -48,3 +48,15 @@ if omarchy-done ensure omandroid-power-key; then
 hl.bind("XF86PowerOff", hl.dsp.exec_cmd("omarchy-menu toggle system"), { description = "System menu" })
 LUA
 fi
+
+# On-screen keyboard: squeekboard shows itself when a text field takes focus
+# (Hyprland relays text-input-v3 to its input-method-v2). Started from
+# Omarchy's user autostart file, once.
+if omarchy-done ensure omandroid-osk; then
+  gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true
+  cat >>~/.config/hypr/autostart.lua <<'LUA'
+
+-- Omandroid: on-screen keyboard
+o.launch_on_start("squeekboard")
+LUA
+fi
