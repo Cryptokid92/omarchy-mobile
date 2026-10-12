@@ -45,10 +45,10 @@ index 78cf757..1552b48 100755
  # with it. Hand focus back to the monitor that had it once they are all gone.
  # The class goes through the environment, since in argv the screensaver's pgrep and pkill would match it.
 diff --git i/bin/omarchy-screensaver w/bin/omarchy-screensaver
-index acd3868..bf7ffd6 100755
+index acd3868..1d9e819 100755
 --- i/bin/omarchy-screensaver
 +++ w/bin/omarchy-screensaver
-@@ -6,8 +6,27 @@ screensaver_in_focus() {
+@@ -6,8 +6,34 @@ screensaver_in_focus() {
    hyprctl activewindow -j | jq -e '.class == "org.omarchy.screensaver"' >/dev/null 2>&1
  }
  
@@ -62,11 +62,18 @@ index acd3868..bf7ffd6 100755
 +}
 +
 +# Turn the on-screen keyboard back on if omarchy-launch-screensaver turned it off.
++# With lock-after-screensaver, wait until the lock screen is up: until then this
++# terminal still has focus and the keyboard would flash on the way out.
 +restore_osk() {
 +  local marker="${XDG_RUNTIME_DIR:-/tmp}/omarchy-screensaver-osk-off"
-+  if [[ -f $marker ]]; then
-+    rm -f "$marker"
-+    gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true &>/dev/null || true
++  [[ -f $marker ]] || return 0
++  rm -f "$marker"
++  local enable="gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true"
++  if omarchy-toggle-enabled lock-after-screensaver; then
++    # Detached: this script is about to be stopped by the lock.
++    setsid -f bash -c "for _ in \$(seq 50); do omarchy-shell lock status 2>/dev/null | grep -q '\"secure\":true' && break; sleep 0.1; done; $enable" &>/dev/null
++  else
++    $enable &>/dev/null || true
 +  fi
 +}
 +
@@ -77,7 +84,7 @@ index acd3868..bf7ffd6 100755
    pkill -x ttfx 2>/dev/null
    pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null
    exit 0
-@@ -17,6 +36,9 @@ exit_screensaver() {
+@@ -17,6 +43,9 @@ exit_screensaver() {
  trap exit_screensaver SIGINT SIGTERM SIGHUP SIGQUIT
  
  printf '\033]11;rgb:00/00/00\007'  # Set background color to black
@@ -87,7 +94,7 @@ index acd3868..bf7ffd6 100755
  
  hyprctl eval 'hl.config({ cursor = { invisible = true } })' &>/dev/null || hyprctl keyword cursor:invisible true &>/dev/null
  
-@@ -41,7 +63,18 @@ while true; do
+@@ -41,7 +70,18 @@ while true; do
      --random-effect --no-eol --no-restore-cursor &
  
    while pgrep -t "${tty#/dev/}" -x ttfx >/dev/null; do
