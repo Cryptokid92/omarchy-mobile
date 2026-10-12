@@ -1,0 +1,183 @@
+diff --git i/shell/plugins/lock/Keypad.qml w/shell/plugins/lock/Keypad.qml
+new file mode 100644
+index 0000000..eed36cb
+--- /dev/null
++++ w/shell/plugins/lock/Keypad.qml
+@@ -0,0 +1,68 @@
++import QtQuick
++import qs.Commons
++import qs.Commons as Commons
++import qs.Ui
++
++// Number pad for touch-only devices (phones, tablets), where the lock screen
++// can't count on a keyboard: the session lock hides every other surface,
++// on-screen keyboards included. Enabled by the `lock-keypad` toggle; the digits
++// go into the same password field, so a PIN is simply a numeric password.
++Item {
++  id: root
++
++  signal digit(string value)
++  signal backspace()
++  signal enter()
++
++  readonly property int key: Math.round(Math.min(Style.space(84), (parent ? parent.width : 420) * 0.22))
++  readonly property int gap: Math.round(key * 0.3)
++  readonly property var keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "back", "0", "enter"]
++  readonly property var keySpec: Border.surfaceSpec("lock", "border-active", Commons.Color.lock.borderActive, 2, "border-alpha")
++
++  implicitWidth: key * 3 + gap * 2
++  implicitHeight: key * 4 + gap * 3
++  width: implicitWidth
++  height: implicitHeight
++  opacity: enabled ? 1 : 0.5
++
++  Grid {
++    anchors.fill: parent
++    columns: 3
++    spacing: root.gap
++
++    Repeater {
++      model: root.keys
++
++      delegate: BorderSurface {
++        id: keyCap
++        required property string modelData
++
++        width: root.key
++        height: root.key
++        radius: Style.cornerRadius
++        color: tap.pressed ? Commons.Color.lock.selection : Commons.Color.lock.background
++        borderSpec: root.keySpec
++
++        Text {
++          anchors.centerIn: parent
++          textFormat: Text.PlainText
++          text: keyCap.modelData === "back" ? "⌫" : (keyCap.modelData === "enter" ? "⏎" : keyCap.modelData)
++          color: Commons.Color.lock.text
++          font.family: Style.font.family
++          font.pixelSize: Math.round(root.key * 0.38)
++        }
++
++        MouseArea {
++          id: tap
++          anchors.fill: parent
++          enabled: root.enabled
++          onClicked: {
++            if (keyCap.modelData === "back") root.backspace()
++            else if (keyCap.modelData === "enter") root.enter()
++            else root.digit(keyCap.modelData)
++          }
++        }
++      }
++    }
++  }
++}
+diff --git i/shell/plugins/lock/LockView.qml w/shell/plugins/lock/LockView.qml
+index ecec660..27db48b 100644
+--- i/shell/plugins/lock/LockView.qml
++++ w/shell/plugins/lock/LockView.qml
+@@ -24,8 +24,10 @@ Item {
+   property bool powerSaverActive: false
+   property string passwordText: ""
+   property bool syncingPasswordText: false
++  // Touch-only devices: a number pad under the field (the lock-keypad toggle).
++  property bool keypad: false
+ 
+-  readonly property string placeholderText: "Enter Password"
++  readonly property string placeholderText: keypad ? "Enter PIN" : "Enter Password"
+   readonly property int fieldWidth: 381
+   readonly property int fieldHeight: 67
+   readonly property int outlineThickness: 3
+@@ -152,11 +154,37 @@ Item {
+       onPositionChanged: root.wakeRequested()
+     }
+ 
++    Keypad {
++      id: numberPad
++      visible: root.keypad
++      enabled: root.inputEnabled && !root.authenticatingPassword
++      anchors.horizontalCenter: parent.horizontalCenter
++      anchors.bottom: parent.bottom
++      anchors.bottomMargin: Math.round(parent.height * 0.08)
++      onDigit: function(value) {
++        root.wakeRequested()
++        if (root.failureMessage.length > 0) root.clearFailureRequested()
++        root.passwordTextEdited(root.passwordText + value)
++      }
++      onBackspace: {
++        root.wakeRequested()
++        root.passwordTextEdited(root.passwordText.slice(0, -1))
++      }
++      onEnter: {
++        var submitted = root.passwordText
++        root.passwordTextEdited("")
++        if (submitted.length > 0) root.submitPassword(submitted)
++      }
++    }
++
+     BorderSurface {
+       id: inputField
+       width: root.fieldWidth
+       height: root.fieldHeight
+-      anchors.centerIn: parent
++      anchors.horizontalCenter: parent.horizontalCenter
++      anchors.verticalCenter: root.keypad ? undefined : parent.verticalCenter
++      anchors.bottom: root.keypad ? numberPad.top : undefined
++      anchors.bottomMargin: root.keypad ? Style.space(40) : 0
+       color: Commons.Color.lock.background
+       borderSpec: root.inputBorderSpec
+       radius: Style.cornerRadius
+diff --git i/shell/plugins/lock/Service.qml w/shell/plugins/lock/Service.qml
+index ccd496a..49a9085 100644
+--- i/shell/plugins/lock/Service.qml
++++ w/shell/plugins/lock/Service.qml
+@@ -24,6 +24,7 @@ Item {
+   property bool fingerprintAuthenticating: false
+   property bool passwordPamConfigured: false
+   property bool fingerprintConfigured: false
++  property bool keypad: false
+   property int fingerprintUnreachedStreak: 0
+   property bool fingerprintAttemptReachedDevice: false
+   property bool fingerprintAttemptFastError: false
+@@ -208,6 +209,7 @@ Item {
+   }
+ 
+   function beginLock() {
++    keypadToggle.reload()
+     if (!passwordPamConfigured) {
+       logEvent("lock-denied: missing-pam")
+       return false
+@@ -481,6 +483,7 @@ Item {
+       color: Commons.Color.background
+ 
+       LockView {
++        keypad: root.keypad
+         id: lockView
+         anchors.fill: parent
+         backgroundPath: root.backgroundPath
+@@ -516,6 +519,7 @@ Item {
+     exclusionMode: ExclusionMode.Ignore
+ 
+     LockView {
++      keypad: root.keypad
+       anchors.fill: parent
+       backgroundPath: root.backgroundPath
+       videoPosterPath: root.videoPosterPath
+@@ -813,6 +817,17 @@ Item {
+     else armBlankTimer()
+   }
+ 
++  // Touch-only devices opt into the number pad: omarchy-toggle lock-keypad.
++  FileView {
++    id: keypadToggle
++    path: root.stateHome + "/omarchy/toggles/lock-keypad"
++    watchChanges: true
++    printErrors: false
++    onLoaded: root.keypad = true
++    onLoadFailed: root.keypad = false
++    onFileChanged: reload()
++  }
++
+   FileView {
+     path: "/etc/pam.d/omarchy-lock-password"
+     watchChanges: true

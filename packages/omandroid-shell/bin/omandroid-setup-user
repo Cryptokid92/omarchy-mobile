@@ -82,3 +82,10 @@ if omarchy-done ensure omandroid-chromium-no-first-run; then
   grep -qx -- --no-first-run ~/.config/chromium-flags.conf 2>/dev/null ||
     echo --no-first-run >>~/.config/chromium-flags.conf
 fi
+
+# Lock screen: Omarchy's lock with a number pad (lock-keypad toggle, see
+# patches/omarchy/0003-*), since its session lock hides the on-screen keyboard.
+if omarchy-done ensure omandroid-lock-keypad; then
+  mkdir -p ~/.local/state/omarchy/toggles
+  touch ~/.local/state/omarchy/toggles/lock-keypad
+fi
