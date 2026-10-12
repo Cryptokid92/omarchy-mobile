@@ -200,7 +200,6 @@ Item {
   readonly property int touch: Math.max(44, Style.space(44))
   readonly property int inputHeight: Math.max(48, Style.space(48))
   readonly property int dockHeight: inputHeight + Style.spacing.xxl * 2
-  readonly property int barSize: shell && shell.bar ? shell.bar.barSize : 0
 
   property real reveal: opened ? 1 : 0
   Behavior on reveal { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
@@ -214,6 +213,9 @@ Item {
       required property var modelData
       screen: modelData
 
+      // Hidden while the drawer is open, so the on-screen keyboard takes the
+      // bottom edge and the drawer's input sits right above it.
+      visible: !root.opened
       anchors { bottom: true; left: true; right: true }
       implicitHeight: root.dockHeight
       exclusionMode: ExclusionMode.Auto
@@ -237,8 +239,9 @@ Item {
 
     visible: root.opened || root.reveal > 0
     anchors { top: true; bottom: true; left: true; right: true }
-    margins.top: root.barSize
-    exclusionMode: ExclusionMode.Ignore
+    // Normal: fit between the bar and the on-screen keyboard, like Android's
+    // adjustResize.
+    exclusionMode: ExclusionMode.Normal
     color: "transparent"
     WlrLayershell.namespace: "omandroid-launcher"
     WlrLayershell.layer: WlrLayer.Top
