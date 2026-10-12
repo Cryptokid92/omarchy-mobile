@@ -1,6 +1,6 @@
 # GPU acceleration plan: Mali-G710 on Panthor + Mesa (cheetah / gs201)
 
-Status: G0 (offline prep) done, see "G0 status" at the end; G1 onward not started. Written 2026-10-11 against
+Status: G0, G1 and G2 done (2026-10-11). Hyprland renders on the Mali-G710; see "G2 result" at the end. Written 2026-10-11 against
 `omandroid` @ `cbde67d76` (Linux 7.3-rc6), Arch `mesa 1:26.2.4-1`,
 `linux-firmware-other 20260916-1`.
 
@@ -646,3 +646,22 @@ For the upstream Mesa MR, record the `core_features` low byte (the Mesa
 - **Whether the "stacks"/"coregroup" CMU_G3D gates could be off** while
   the "core" gate is on. The Q-channel should keep them running. If the MCU
   times out, this is the first suspect.
+
+## G2 result (2026-10-11)
+
+- Patched Mesa 26.2.4 (`packages/mesa`, G710 model entry) built natively on the
+  phone and installed: `mesa`, `vulkan-panfrost`, `vulkan-mesa-implicit-layers`.
+- `eglinfo`: OpenGL ES 3.1 / OpenGL 3.1, renderer "Mali-G710 MC7 (Panfrost)".
+  `vulkaninfo`: "Mali-G710 MC7", driver panvk, Vulkan 1.4.354. `vkcube` runs in
+  the Hyprland session.
+- Hyprland/aquamarine: "Renderer: Mali-G710 MC7 (Panfrost)". No Mesa change was
+  needed for the display side: simpledrm has no Gallium driver of its own, so
+  Mesa's pipe-loader falls back to kmsro (`pipe_loader_drm.c`, "kmsro supports
+  lots of drivers, try as a fallback"), which renders on the panthor render node
+  and scans out on simpledrm.
+- The panthor blacklist is gone: udev autoloads the module at boot, before SDDM
+  starts Hyprland. The GPU stays powered through
+  `20-omandroid-gpu-always-on.rules` (G3D cannot be powered back up yet).
+- Still open: `_opp_set_regulators: no regulator (mali)` at probe (harmless,
+  fixed OPP at 151 MHz); DVFS and a real power-domain driver; upstream the G710
+  Mesa entry.
