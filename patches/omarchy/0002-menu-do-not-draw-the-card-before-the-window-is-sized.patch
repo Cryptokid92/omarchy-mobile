@@ -1,15 +1,15 @@
 diff --git i/shell/plugins/menu/Menu.qml w/shell/plugins/menu/Menu.qml
-index 4a952c2..69a6dbd 100644
+index 4a952c2..6c6d921 100644
 --- i/shell/plugins/menu/Menu.qml
 +++ w/shell/plugins/menu/Menu.qml
 @@ -1211,6 +1211,10 @@ Item {
  
      BorderSurface {
        id: card
-+      // Hidden until the compositor has sized the window: on the first frame
-+      // its height is still 0, which would draw the card at the top edge for
-+      // a frame before it centers.
-+      visible: panel.width > 0 && panel.height > 0
++      // Hidden until the compositor has sized the window to the screen: for a
++      // frame after opening it still has a placeholder size, which draws a
++      // short card at the top edge before it centers.
++      visible: panel.screen ? panel.height === panel.screen.height && panel.width === panel.screen.width : panel.height > 0
        width: root.cardWidth
        height: Math.min(root.cardHeight, panel.height - Style.gapsOut - panel.effectiveCardTop)
        radius: root.cornerRadius

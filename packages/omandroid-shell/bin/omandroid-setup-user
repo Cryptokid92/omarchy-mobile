@@ -58,3 +58,10 @@ fi
 if omarchy-done ensure omandroid-osk-input-method; then
   systemctl --user mask --now omarchy-fcitx5.service
 fi
+
+# Suspend isn't supported on the phone's kernel yet: take it out of the system
+# menu with Omarchy's own toggle (omarchy-toggle-suspend brings it back).
+if omarchy-done ensure omandroid-suspend-off; then
+  mkdir -p ~/.local/state/omarchy/toggles
+  touch ~/.local/state/omarchy/toggles/suspend-off
+fi
