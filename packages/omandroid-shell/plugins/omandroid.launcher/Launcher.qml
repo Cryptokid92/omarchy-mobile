@@ -245,7 +245,9 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "omandroid-launcher"
     WlrLayershell.layer: WlrLayer.Top
-    WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    // OnDemand, not Exclusive: Hyprland sends no touch to other layers while
+    // one holds exclusive focus, and that includes the on-screen keyboard.
+    WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     onVisibleChanged: if (visible) Qt.callLater(function() { input.forceActiveFocus() })
 
