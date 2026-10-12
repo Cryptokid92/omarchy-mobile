@@ -1,0 +1,51 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Phone hardware-key gestures, called by Hyprland binds (hypr/phone.lua):
+#   power + volume down together  -> screenshot (Omarchy's, full screen)
+#   power on its own              -> Omarchy's system menu, on release
+# Hyprland can't bind a chord of two plain keys, so each key reports here and
+# the chord is worked out from when the keys went down.
+set -u
+
+state="${XDG_RUNTIME_DIR:-/tmp}/omandroid-keys"
+mkdir -p "$state"
+
+now() { date +%s%3N; }
+
+# Keys count as pressed together within this many milliseconds.
+window=500
+
+recent() {
+  [[ -f $state/$1 ]] && (($(now) - $(<"$state/$1") <= window))
+}
+
+screenshot() {
+  # Once per chord, however the two presses arrive.
+  [[ -f $state/chord ]] && return
+  touch "$state/chord"
+  omarchy-capture-screenshot fullscreen save &
+}
+
+case "${1:-}" in
+  power-down)
+    now >"$state/power"
+    recent volume-down && screenshot
+    ;;
+  volume-down)
+    now >"$state/volume-down"
+    # Power still held, or pressed just before.
+    [[ -f $state/power ]] && screenshot
+    ;;
+  power-up)
+    if [[ -f $state/chord ]]; then
+      rm -f "$state/chord"
+    else
+      omarchy-menu toggle system
+    fi
+    rm -f "$state/power"
+    ;;
+  *)
+    echo "Usage: omandroid-keys power-down|power-up|volume-down" >&2
+    exit 1
+    ;;
+esac
