@@ -2,6 +2,14 @@
 
 Findings from real hardware, newest first. `BRINGUP-M1.md` is the research map written before first boot.
 
+## 2026-10-11: hardware buttons (gpio-keys)
+
+- **All three buttons are plain GPIOs**, so one `gpio-keys` node covers them (kernel branch `omandroid-buttons`): Volume Down `gpa10-1` (pull-up), Volume Up `gpa8-5` (FAR_ALIVE, no pull), Power `gpa10-0` (pull-up). All active low, all `wakeup-source`. They appear as `/dev/input/by-path/platform-gpio-keys-event` with KEY_VOLUMEDOWN/UP/POWER.
+- **Power is `PMIC_PWRON_OD_L`** (Google's `gs201-common.dtsi`): the S2MPG12 PWRONB line is also routed to the SoC. Stock configures the pin but reports the key through `s2mpg12-keys` over ACPM instead. Upstream gs101 Pixels use the GPIO (`gpa10-1` there), so we do the same. Reading the line doesn't affect the PMIC's own long-press reset.
+- **Needed the ALIVE pin controller** (`0x180d0000`, banks gpa0-5, 9, 10; alias `pinctrl0`). The driver data was already there; the DT node wasn't. Wake-up interrupts are direct, one GIC SPI per pin (gpa10 = SPI 42/43), from the stock DT.
+- **Test:** `evtest --grab /dev/input/by-path/platform-gpio-keys-event`. `--grab` keeps logind and Hyprland from also acting on the key.
+- **PMIC path (not needed for KEY_POWER, kept for regulators/RTC):** upstream has gs101 ACPM (`exynos-acpm*.c`, `google,gs101-acpm-ipc`) and S2MPG10/11 on top of it (`sec-acpm.c`). gs201 needs (1) a `google,gs201-acpm-ipc` match (mailbox `0x18210000`, SRAM `0x18500000`; check `initdata_base` in Google's ACPM driver), (2) S2MPG12/S2MPG13 register maps and IRQ tables in `sec-acpm.c`/`sec-irq.c`, from Google's GPL `soc/gs/drivers/mfd/s2mpg12-*.c` and `s2mpg13-*.c`, (3) regulator data. Google's `s2mpg12-key.c` only duplicates the GPIO key; upstream has no s2mpg10 key driver either.
+
 ## 2026-10-11: touchscreen (Synaptics S3908 on SPI)
 
 - **Works with our own driver** (`drivers/input/touchscreen/synaptics_tcm.c`, kernel branch `omandroid-touch`): TouchComm v1, message CRC off, firmware `S3908GA1B0-15.0` build 4104960, 1440x3120, 10 objects. Hyprland lists it under Touch; the panel is portrait with transform 0, so no axis swap or flip.
