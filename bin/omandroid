@@ -278,7 +278,7 @@ cmd_fastboot() {
       adb reboot bootloader
     elif "$ssh" true 2>/dev/null; then
       say "Our Linux: reboot-to bootloader"
-      "$ssh" '(sleep 1; /usr/local/bin/reboot-to bootloader) >/dev/null 2>&1 &' || true
+      "$ssh" '(sleep 1; reboot-to bootloader) >/dev/null 2>&1 &' || true
       sleep 25
       if ! in_fastboot && "$ssh" true 2>/dev/null; then
         say "Bootloader ignored the reason; crashing so it falls back to slot A"
@@ -333,7 +333,7 @@ cmd_push() {
     say "${p}_b ($dev) written and verified"
   done
   say "Rebooting into the new images"
-  "$ssh" 'sync; (sleep 1; /usr/local/bin/reboot-to omandroid) >/dev/null 2>&1 &' || true
+  "$ssh" 'sync; (sleep 1; reboot-to omandroid) >/dev/null 2>&1 &' || true
   sleep 15
   local i
   for i in $(seq 1 45); do
