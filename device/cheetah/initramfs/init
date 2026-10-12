@@ -12,6 +12,12 @@ mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
 mount -t configfs configfs /sys/kernel/config
 mount -t tmpfs tmpfs /run
 
+# With "splash" on the command line, Plymouth shows the boot animation once
+# Arch starts, so keep status lines off the screen (they still go to kmsg).
+# Storage-guard warnings always show.
+SCREEN=/dev/tty0
+grep -qw splash /proc/cmdline && SCREEN=/dev/null
+
 # --- UFS safety: every SCSI disk is read-only, before anything else runs ---
 # The UFS device holds irreplaceable per-device calibration (efs, persist,
 # modem_userdata). Until UFS support is trusted, mark every /dev/sd* disk and
@@ -69,7 +75,7 @@ ufs_ro_log "guard running (pid $!)"
 
 hostname omandroid
 
-say() { echo "omandroid: $*" | tee /dev/kmsg > /dev/tty0 2>/dev/null; }
+say() { echo "omandroid: $*" | tee /dev/kmsg > $SCREEN 2>/dev/null; }
 
 # The panel runs in MIPI DSI command mode: it only takes a new frame when
 # DECON0 sends one on the panel's TE pulse. ABL masks that trigger after
@@ -78,7 +84,7 @@ say() { echo "omandroid: $*" | tee /dev/kmsg > /dev/tty0 2>/dev/null; }
 # Stopgap until we have a real DECON/DSI driver.
 devmem 0x1c240030 0x3061 >/dev/null
 
-clear > /dev/tty0 2>/dev/null
+clear > $SCREEN 2>/dev/null
 
 # Bring-up probes: watchdog control registers, and the buffer address each
 # display DMA channel (DPP) is scanning out, i.e. where ABL's framebuffer is
@@ -152,7 +158,7 @@ grep -q omandroid.debug /proc/cmdline && {
   echo "--- cmdline tail ---"
   tr ' ' '\n' < /proc/cmdline | tail -12 | tr '\n' ' '
   echo
-} > /dev/tty0 2>&1
+} > $SCREEN 2>&1
 
 # UFS probe report when the cmdline has omandroid.ufs-probe: wait for the
 # disks to settle, then list them and the GPT partition names. Read-only: it
@@ -180,7 +186,7 @@ grep -q omandroid.ufs-probe /proc/cmdline && (
     echo "=== ufs-probe: dmesg ==="
     dmesg | grep -iE 'ufs|scsi|sd[a-z]|14700000' | tail -25
   } > /run/ufs-probe.txt 2>&1
-  cat /run/ufs-probe.txt > /dev/tty0 2>/dev/null
+  cat /run/ufs-probe.txt > $SCREEN 2>/dev/null
   while read -r line; do echo "omandroid: $line" > /dev/kmsg; done < /run/ufs-probe.txt
 ) &
 
@@ -198,7 +204,7 @@ say "ready"
     echo "=== USB never configured; dmesg follows ==="
     dmesg | grep -iE 'dwc3|phy|usb|udc|clk|error|fail' | tail -30
     echo "omandroid: no USB host, crashing in 20 s so ABL falls back to slot A"
-  } > /dev/tty0
+  } > $SCREEN
   sleep 20
   sync
   # reboot-to bootloader is unreliable; a panic (panic=10) reboots, and once
