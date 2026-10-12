@@ -8,6 +8,9 @@
 -- Omarchy floats them through its floating-window tag, so drop the tag.
 hl.window_rule({ match = { class = ".*" }, tag = "-floating-window" })
 hl.window_rule({ match = { class = ".*" }, maximize = true })
+-- ...except the screensaver, which Omarchy shows fullscreen over the bars.
+hl.window_rule({ match = { class = "^org.omarchy.screensaver$" }, maximize = false })
+hl.window_rule({ match = { class = "^org.omarchy.screensaver$" }, fullscreen = true })
 
 -- Lock after boot, like a phone: the session logs in automatically, then
 -- Omarchy's lock comes up with its PIN pad. Only once a PIN is set (the

@@ -8,7 +8,7 @@ destination=${1:?Usage: ./install DESTDIR}
 install -Dm755 bin/omandroid-setup-user "$destination/usr/bin/omandroid-setup-user"
 while IFS= read -r -d '' file; do
   install -Dm644 "$file" "$destination/usr/share/omandroid/shell/$file"
-done < <(find plugins profile hypr -type f -print0)
+done < <(find plugins profile hypr branding -type f -print0)
 install -Dm644 environment.d/20-omandroid-osk.conf "$destination/usr/lib/environment.d/20-omandroid-osk.conf"
 install -Dm644 LICENSE "$destination/usr/share/licenses/omandroid-shell/LICENSE"
 install -Dm644 version "$destination/usr/share/omandroid/shell/version"

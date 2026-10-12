@@ -107,3 +107,11 @@ if omarchy-done ensure omandroid-menu-hide-unlock; then
     sed -i '0,/^{/s//{\n  \/\/ Omandroid: no disk-unlock screen on the phone\n  "style.unlock": {"when": "false"},/' "$extension"
   fi
 fi
+
+# Screensaver for a portrait phone: the wordmark stacked on two lines, in
+# Omarchy's branding file, and a smaller terminal font so it fits (patch
+# 0006 lets the screensaver use the user's foot config). Seeded once.
+if omarchy-done ensure omandroid-screensaver; then
+  install -Dm644 "$share/branding/screensaver.txt" ~/.config/omarchy/branding/screensaver.txt
+  install -Dm644 "$share/branding/foot-screensaver.ini" ~/.config/foot/screensaver.ini
+fi

@@ -1,0 +1,48 @@
+diff --git i/bin/omarchy-launch-screensaver w/bin/omarchy-launch-screensaver
+index 78cf757..962102d 100755
+--- i/bin/omarchy-launch-screensaver
++++ w/bin/omarchy-launch-screensaver
+@@ -63,7 +63,10 @@ while read -r m special; do
+     hypr_exec ghostty --class=org.omarchy.screensaver --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size=18 -e omarchy-screensaver
+     ;;
+   *foot*)
+-    hypr_exec foot --app-id=org.omarchy.screensaver --config="$OMARCHY_PATH/default/foot/screensaver.ini" -e omarchy-screensaver
++    # A user copy wins, e.g. a smaller font on a narrow screen.
++    foot_config="$OMARCHY_PATH/default/foot/screensaver.ini"
++    [[ -f ~/.config/foot/screensaver.ini ]] && foot_config=~/.config/foot/screensaver.ini
++    hypr_exec foot --app-id=org.omarchy.screensaver --config="$foot_config" -e omarchy-screensaver
+     ;;
+   *kitty*)
+     hypr_exec kitty --class=org.omarchy.screensaver --override font_size=18 --override window_padding_width=0 -e omarchy-screensaver
+diff --git i/bin/omarchy-screensaver w/bin/omarchy-screensaver
+index acd3868..37ec881 100755
+--- i/bin/omarchy-screensaver
++++ w/bin/omarchy-screensaver
+@@ -6,8 +6,13 @@ screensaver_in_focus() {
+   hyprctl activewindow -j | jq -e '.class == "org.omarchy.screensaver"' >/dev/null 2>&1
+ }
+ 
++# Put the cursor back the way it was: a touch device keeps it hidden.
++cursor_was_invisible=$(hyprctl getoption cursor:invisible -j 2>/dev/null | jq -r '.bool // (.int == 1)' 2>/dev/null)
++
+ exit_screensaver() {
+-  hyprctl eval 'hl.config({ cursor = { invisible = false } })' &>/dev/null || hyprctl keyword cursor:invisible false &>/dev/null || true
++  if [[ $cursor_was_invisible != true ]]; then
++    hyprctl eval 'hl.config({ cursor = { invisible = false } })' &>/dev/null || hyprctl keyword cursor:invisible false &>/dev/null || true
++  fi
+   pkill -x ttfx 2>/dev/null
+   pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null
+   exit 0
+@@ -35,6 +40,12 @@ wait_for_terminal_resize() {
+ 
+ wait_for_terminal_resize
+ 
++# Touch devices: focusing the terminal brings up the on-screen keyboard
++# (squeekboard's sm.puri.OSK0), which would cover the screensaver.
++if busctl --user status sm.puri.OSK0 &>/dev/null; then
++  (sleep 0.5; busctl --user call sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 SetVisible b false) &>/dev/null &
++fi
++
+ while true; do
+   ttfx -i ~/.config/omarchy/branding/screensaver.txt \
+     --frame-rate 120 --canvas-width 0 --canvas-height 0 --reuse-canvas --anchor-canvas c --anchor-text c\
