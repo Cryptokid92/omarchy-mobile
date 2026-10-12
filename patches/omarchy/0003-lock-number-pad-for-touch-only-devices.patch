@@ -73,7 +73,7 @@ index 0000000..eed36cb
 +  }
 +}
 diff --git i/shell/plugins/lock/LockView.qml w/shell/plugins/lock/LockView.qml
-index ecec660..27db48b 100644
+index ecec660..c88473d 100644
 --- i/shell/plugins/lock/LockView.qml
 +++ w/shell/plugins/lock/LockView.qml
 @@ -24,8 +24,10 @@ Item {
@@ -88,10 +88,33 @@ index ecec660..27db48b 100644
    readonly property int fieldWidth: 381
    readonly property int fieldHeight: 67
    readonly property int outlineThickness: 3
-@@ -152,11 +154,37 @@ Item {
+@@ -55,7 +57,8 @@ Item {
+   signal wakeRequested()
+ 
+   function forcePasswordFocus() {
+-    passwordInput.forceActiveFocus()
++    if (keypad) keypadKeys.forceActiveFocus()
++    else passwordInput.forceActiveFocus()
+   }
+ 
+   function clearPassword() {
+@@ -152,11 +155,50 @@ Item {
        onPositionChanged: root.wakeRequested()
      }
  
++    Item {
++      id: keypadKeys
++      Keys.onPressed: function(event) {
++        if (!numberPad.enabled) return
++        if (event.text.length === 1 && event.text >= "0" && event.text <= "9") numberPad.digit(event.text)
++        else if (event.key === Qt.Key_Backspace) numberPad.backspace()
++        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) numberPad.enter()
++        else if (event.key === Qt.Key_Escape) root.passwordTextEdited("")
++        else return
++        event.accepted = true
++      }
++    }
++
 +    Keypad {
 +      id: numberPad
 +      visible: root.keypad
@@ -127,6 +150,15 @@ index ecec660..27db48b 100644
        color: Commons.Color.lock.background
        borderSpec: root.inputBorderSpec
        radius: Style.cornerRadius
+@@ -173,7 +215,7 @@ Item {
+         anchors.leftMargin: inputField.borderLeft + 18 + root.fingerprintReserve
+         verticalAlignment: TextInput.AlignVCenter
+         horizontalAlignment: TextInput.AlignHCenter
+-        activeFocusOnPress: true
++        activeFocusOnPress: !root.keypad
+         clip: true
+         enabled: root.inputEnabled && !root.authenticatingPassword
+         readOnly: root.authenticatingPassword
 diff --git i/shell/plugins/lock/Service.qml w/shell/plugins/lock/Service.qml
 index ccd496a..49a9085 100644
 --- i/shell/plugins/lock/Service.qml

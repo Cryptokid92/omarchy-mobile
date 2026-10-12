@@ -59,6 +59,33 @@ edit("LockView.qml", [
      "    BorderSurface {\n      id: inputField\n", 1),
 ])
 
+# With the number pad, the field itself never takes focus: a focused text field
+# asks for an input method, which brings up the on-screen keyboard behind the
+# lock and leaves it open after unlocking. A plain item takes the hardware keys.
+edit("LockView.qml", [
+    ("  function forcePasswordFocus() {\n    passwordInput.forceActiveFocus()\n  }\n",
+     "  function forcePasswordFocus() {\n"
+     "    if (keypad) keypadKeys.forceActiveFocus()\n"
+     "    else passwordInput.forceActiveFocus()\n"
+     "  }\n", 1),
+    ("        activeFocusOnPress: true\n",
+     "        activeFocusOnPress: !root.keypad\n", 1),
+    ("    Keypad {\n      id: numberPad\n",
+     "    Item {\n"
+     "      id: keypadKeys\n"
+     "      Keys.onPressed: function(event) {\n"
+     "        if (!numberPad.enabled) return\n"
+     "        if (event.text.length === 1 && event.text >= \"0\" && event.text <= \"9\") numberPad.digit(event.text)\n"
+     "        else if (event.key === Qt.Key_Backspace) numberPad.backspace()\n"
+     "        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) numberPad.enter()\n"
+     "        else if (event.key === Qt.Key_Escape) root.passwordTextEdited(\"\")\n"
+     "        else return\n"
+     "        event.accepted = true\n"
+     "      }\n"
+     "    }\n\n"
+     "    Keypad {\n      id: numberPad\n", 1),
+])
+
 edit("Service.qml", [
     ("  property bool fingerprintConfigured: false\n",
      "  property bool fingerprintConfigured: false\n"
