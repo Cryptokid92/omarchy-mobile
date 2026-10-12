@@ -1,0 +1,22 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Build one of our packages natively on the phone and install it with pacman.
+#   tools/phone-install-package packages/omandroid-shell
+# Until there's a package repository for `omarchy update`, this is how new
+# versions reach the phone.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+dir=${1:?Usage: tools/phone-install-package packages/<name>}
+name=$(basename "$dir")
+[[ -f $dir/PKGBUILD ]] || { echo "No PKGBUILD in $dir" >&2; exit 1; }
+
+ssh=tools/phone-ssh
+build=/home/omandroid/build/pkgs
+
+"$ssh" "rm -rf $build/$name && mkdir -p $build && chown omandroid: $build"
+# makepkg's own work dirs (pkg/, src/ at the top) and old packages stay home.
+tar cf - --exclude="./$name/pkg" --exclude="./$name/src/build" --exclude="*.pkg.tar.*" \
+  -C "$(dirname "$dir")" "./$name" | "$ssh" "tar xf - -C $build --no-same-owner && chown -R omandroid: $build/$name"
+"$ssh" "su - omandroid -c 'cd $build/$name && makepkg -f --noconfirm' 2>&1 | tail -2"
+"$ssh" "OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -U --noconfirm $build/$name/$name-*.pkg.tar.* 2>&1 | grep -E '^error|installing|upgrading|reinstalling' ; pacman -Q $name"
