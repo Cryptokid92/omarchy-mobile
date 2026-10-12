@@ -678,3 +678,12 @@ runbook.
 - The real BCM4389 chip revision and IPC version (W2).
 - The APM UART clock rate and USI wrapper (BT1).
 - Whether `s2mpu_hsi2` `CTRL0` reads 0 (W1, step 1).
+
+## B1 result (2026-10-11, on the phone)
+
+- Kernel `7.3.0-rc6-...-ga3061be71070` (`omandroid-wifi`, now merged into `omandroid`). USB, UFS, touch and the GPU unchanged.
+- `10d60000.i2c` is `i2c-0`: the first gs201 HSI2C on mainline works with the clocks as they are. Clients `0-0036` and `0-0066` enumerate.
+- `i2cget 0x66 0x00` = **0x3b** (PMIC_ID). Charger mode `0x69/0xb9` = 0x05.
+- **Fuel gauge STATUS = 0x0082: the POR bit is set**, and DesignCap reads 3000 (the chip default; Google's model has 0x09c5). The gauge has lost Google's model and runs its own default EZ model. Read-only register dump: RepSOC 98 %, VCell 4.327 V, current about 0, Temp exactly 22.0 °C (probably a default; no thermistor configuration).
+- Because our DT has no `monitored-battery`, `max17042_init_worker` writes nothing on POR (`max17042_battery.c:1187`: `enable_por_init` is only set by `max17042_apply_battery_properties`). So the driver was loaded: `max170xx_battery` reports capacity 97 %, 4.32 V, -7.8 mA, charge_full 2898 mAh of design 3000. Its interrupt (gpa9-3) stayed at 0, no storm. The fuel gauge now autoloads (removed from the blacklist); UPower and the status bar show the battery.
+- Follow-ups: load Google's M5 model (`gs201-cheetah-battery-data.dtsi`) so capacity (4926 mAh) and temperature are right; check what Android's driver does when it next sees the gauge (it may reload its model on its own POR check); charger (B3) waits for Type-C (B4).
