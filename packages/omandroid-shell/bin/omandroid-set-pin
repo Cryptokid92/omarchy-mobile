@@ -1,0 +1,46 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Set or change the phone's PIN. The PIN is the account password: Omarchy's
+# lock screen (with its number pad) and sudo both check it through PAM.
+#
+#   omandroid-set-pin           open a terminal to set or change it
+#   omandroid-set-pin --nudge   at login: if there's no PIN yet, say so
+#
+# Once a PIN exists, the phone locks right after it starts (lock-on-start).
+set -u
+
+toggles=~/.local/state/omarchy/toggles
+
+has_pin() {
+  # PAM's own checker: an empty password is rejected once a PIN is set.
+  ! printf '' | unix_chkpwd "$USER" nullok 2>/dev/null
+}
+
+case "${1:-}" in
+  --nudge)
+    has_pin && exit 0
+    omarchy-notification-send -u critical "Set a PIN" \
+      "Your phone has no PIN, so it can't lock. Tap to set one." \
+      --exec omandroid-set-pin
+    ;;
+  --inner)
+    echo "Your PIN unlocks the phone and is used for sudo."
+    echo "Use digits only: the lock screen has a number pad."
+    echo
+    until passwd; do
+      echo
+      gum confirm "Try again?" || exit 1
+    done
+    mkdir -p "$toggles"
+    touch "$toggles/lock-on-start"
+    echo
+    echo "PIN set. Your phone now locks after it starts."
+    ;;
+  "")
+    exec omarchy-launch-floating-terminal-with-presentation "omandroid-set-pin --inner"
+    ;;
+  *)
+    echo "Usage: omandroid-set-pin [--nudge]" >&2
+    exit 1
+    ;;
+esac

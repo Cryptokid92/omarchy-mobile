@@ -119,3 +119,12 @@ if omarchy-done ensure omandroid-screensaver; then
   install -Dm644 "$share/branding/screensaver.txt" ~/.config/omarchy/branding/screensaver.txt
   install -Dm644 "$share/branding/foot-screensaver.ini" ~/.config/foot/screensaver.ini
 fi
+
+# System > PIN sets or changes the phone's PIN (omandroid-set-pin), through
+# Omarchy's menu extension file. Added once.
+if omarchy-done ensure omandroid-menu-pin; then
+  extension=~/.config/omarchy/extensions/omarchy-menu.jsonc
+  if [[ -f $extension ]] && ! grep -q '"system.pin"' "$extension"; then
+    sed -i '0,/^{/s//{\n  "system.pin": {"icon":"󰌾","label":"PIN","description":"Set or change the PIN that unlocks this phone","action":"omandroid-set-pin"},/' "$extension"
+  fi
+fi

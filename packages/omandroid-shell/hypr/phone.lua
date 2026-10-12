@@ -28,3 +28,6 @@ hl.unbind("XF86PowerOff")
 o.bind("XF86PowerOff", "Power key", "omandroid-keys power-down", { locked = true })
 o.bind("XF86PowerOff", "System menu", "omandroid-keys power-up", { locked = true, release = true })
 o.bind("XF86AudioLowerVolume", "Screenshot chord", "omandroid-keys volume-down", { locked = true, non_consuming = true })
+
+-- No PIN yet (a fresh phone): a notification offers to set one.
+o.launch_on_start("omandroid-set-pin --nudge")
