@@ -1,0 +1,69 @@
+diff --git i/shell/plugins/background/Background.qml w/shell/plugins/background/Background.qml
+index a05f110..00cedb9 100644
+--- i/shell/plugins/background/Background.qml
++++ w/shell/plugins/background/Background.qml
+@@ -212,6 +212,15 @@ Item {
+     if (!bgSwitchProc.running) bgSwitchProc.running = true
+   }
+ 
++  function openStyleMenu() {
++    if (!styleMenuProc.running) styleMenuProc.running = true
++  }
++
++  Process {
++    id: styleMenuProc
++    command: ["omarchy-menu", "summon", "style"]
++  }
++
+   function openThemeSwitcher() {
+     var payload = JSON.stringify({ source: "themes" })
+ 
+@@ -512,6 +521,10 @@ Item {
+       MouseArea {
+         anchors.fill: parent
+         acceptedButtons: Qt.LeftButton | Qt.RightButton
++        onPressAndHold: function(mouse) {
++          root.openStyleMenu()
++          mouse.accepted = true
++        }
+         onDoubleClicked: function(mouse) {
+           if (mouse.button === Qt.RightButton) root.openThemeSwitcher()
+           else root.openSelector()
+diff --git i/shell/plugins/image-picker/ImagePicker.qml w/shell/plugins/image-picker/ImagePicker.qml
+index f9280f2..3326797 100644
+--- i/shell/plugins/image-picker/ImagePicker.qml
++++ w/shell/plugins/image-picker/ImagePicker.qml
+@@ -55,10 +55,11 @@ Item {
+   property color foreground: Commons.Color.imagePicker.text
+   property color selectedBorder: Commons.Color.imagePicker.selectedBorder
+   property color unselectedBorder: Commons.Color.imagePicker.unselectedBorder
+-  property int expandedWidth: 768
+-  property int expandedHeight: 475
++  // Fit narrow screens (phones): never wider than the window allows.
++  property int expandedWidth: panel.width > 0 ? Math.min(768, panel.width - 96) : 768
++  property int expandedHeight: Math.round(475 * expandedWidth / 768)
+   property int sliceWidth: 108
+-  property int sliceHeight: 432
++  property int sliceHeight: Math.round(432 * expandedWidth / 768)
+   property int sliceSpacing: -30
+   property int skewOffset: 28
+   property int bottomChromeHeight: showLabels ? (filterable ? 104 : 74) : (filterable ? 60 : 30)
+@@ -719,6 +720,18 @@ Item {
+ 
+           Component.onCompleted: forceActiveFocus()
+ 
++          // Swipe left or right to move through the images on touch screens.
++          DragHandler {
++            target: null
++            yAxis.enabled: false
++            property real swipeX: 0
++            onActiveTranslationChanged: swipeX = activeTranslation.x
++            onActiveChanged: {
++              if (active) swipeX = 0
++              else if (Math.abs(swipeX) > 40) root.selectAdjacent(swipeX < 0 ? 1 : -1)
++            }
++          }
++
+           Repeater {
+             id: imageCards
+             model: visibleImages
