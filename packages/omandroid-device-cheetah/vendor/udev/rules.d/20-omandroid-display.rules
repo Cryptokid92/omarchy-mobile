@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+# The panel's backlight: the video group (the logged-in user) may switch the
+# panel off and on through bl_power, which Omarchy's display off/on uses
+# (patches/omarchy/0008-*). Brightness itself goes through logind.
+ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="1c2c0000.dsi.0", RUN+="/usr/bin/chgrp video /sys%p/bl_power", RUN+="/usr/bin/chmod g+w /sys%p/bl_power"
