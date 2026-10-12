@@ -589,3 +589,22 @@ tools/phone-ssh 'modprobe gs-dsim-cmd; modprobe panel-samsung-s6e3hc4; ls /sys/c
 - Whether sleep-out alone restores the picture (D3b).
 - The exact DBV ABL sets at boot. The driver assumes 1023 and doesn't read it
   back (DCS reads need BTA/RX support in the host).
+
+## D1a result (2026-10-11, on the phone, read-only)
+
+All 16 reads returned cleanly (no SError):
+
+| Register | Value | Reading |
+|---|---|---|
+| DSIM VERSION `0x1c2c0000` | 0x02060000 | |
+| LINK_STATUS1 `0x1c2c000c` | 0x04000000 | |
+| ESCMODE `0x1c2c002c` | 0x01400000 | CMD_LPDT (bit 7) clear: HS commands; no ULPS, no forced stop |
+| CONFIG `0x1c2c004c` | 0x04887cff | |
+| FIFOCTRL `0x1c2c0068` | 0x00005507 | RX, PH and PL FIFOs empty (bits 12, 10, 8); none full |
+| CMD_CONFIG `0x1c2c0080` | 0x00000000 | **PKT_GO_EN clear**: the command path is free |
+| CMD_TE_CTRL0/1 `0x1c2c0084/88` | 0x00000056 / 0x33eb3b26 | |
+| SysMMU DPU0-2 `MMU_CTRL` | 0 | bypass, as expected |
+| S2MPU DPU0-2 `CTRL0` | 0 | **disabled**: the DPU's DMA is unconfined, like HSI0 and HSI2 (the S2MPU item on the pre-ship security list) |
+| CMU_DPU / CMU_DISP option `+0x800` | 0xf1000000 | ABL's setting, to compare after D1b registers the CMUs |
+
+Both open questions about ABL's DSIM state are answered in the driver's favour: D1b can proceed.
