@@ -314,8 +314,12 @@ cmd_flash() {
 }
 
 cmd_push() {
-  local img="$KERNEL_OUT/images" ssh="$ROOT/tools/phone-ssh" p dev want got
+  local img="$KERNEL_OUT/images" ssh="$ROOT/tools/phone-ssh" p dev want got rel
   "$ssh" true || die "phone not reachable at 172.16.42.1"
+  # A kernel whose modules aren't installed boots without its drivers (the GPU
+  # among them): install them first.
+  rel=$(kernel_release)
+  "$ssh" "test -f /usr/lib/modules/$rel/modules.dep" || cmd_modules_push
   for p in boot init_boot vendor_boot vendor_kernel_boot dtbo; do
     [[ -f "$img/$p.img" ]] || die "missing $img/$p.img (run: omandroid images)"
     # Find the partition by GPT name; the init guard leaves only these writable
