@@ -89,3 +89,11 @@ if omarchy-done ensure omandroid-lock-keypad; then
   mkdir -p ~/.local/state/omarchy/toggles
   touch ~/.local/state/omarchy/toggles/lock-keypad
 fi
+
+# Chromium won't lay out narrower than about 500 px, wider than the phone's
+# 480 px (at scale 3), so its window ran off the right edge. At 2.5 it gets
+# about 550 px of layout width. Added once.
+if omarchy-done ensure omandroid-chromium-scale; then
+  grep -q -- '^--force-device-scale-factor=' ~/.config/chromium-flags.conf 2>/dev/null ||
+    echo --force-device-scale-factor=2.5 >>~/.config/chromium-flags.conf
+fi
