@@ -97,3 +97,13 @@ if omarchy-done ensure omandroid-chromium-scale; then
   grep -q -- '^--force-device-scale-factor=' ~/.config/chromium-flags.conf 2>/dev/null ||
     echo --force-device-scale-factor=2.5 >>~/.config/chromium-flags.conf
 fi
+
+# Style > Unlock picks the look of the disk-encryption unlock screen. The phone
+# has no encrypted disk, and the early boot logo follows the default theme, so
+# hide it through Omarchy's menu extension file (reused id + failing "when").
+if omarchy-done ensure omandroid-menu-hide-unlock; then
+  extension=~/.config/omarchy/extensions/omarchy-menu.jsonc
+  if [[ -f $extension ]] && ! grep -q '"style.unlock"' "$extension"; then
+    sed -i '0,/^{/s//{\n  \/\/ Omandroid: no disk-unlock screen on the phone\n  "style.unlock": {"when": "false"},/' "$extension"
+  fi
+fi
