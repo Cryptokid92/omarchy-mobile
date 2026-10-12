@@ -1,0 +1,35 @@
+diff --git i/shell/plugins/services/idle/Service.qml w/shell/plugins/services/idle/Service.qml
+index d0ed8a2..40b497c 100644
+--- i/shell/plugins/services/idle/Service.qml
++++ w/shell/plugins/services/idle/Service.qml
+@@ -267,6 +267,30 @@ Item {
+   // With both timeouts at 0 the monitor stops reporting, so nothing else would end a running cycle.
+   onIdleTimersEnabledChanged: if (!idleTimersEnabled) cancelIdleCycle("idle-timers-disabled")
+ 
++  // Devices that lock on wake (the lock-after-screensaver toggle, e.g. phones)
++  // lock as soon as the user comes back to the screensaver. Starting the
++  // screensaver counts as activity for the main monitor, so it can't tell; this
++  // one only runs while the screensaver is on screen, goes idle after 2 s, and
++  // its next activity is the user: any tap, swipe or key, even ones the
++  // screensaver's terminal never sees.
++  IdleMonitor {
++    id: screensaverWakeMonitor
++    enabled: root.idleEnabled && root.screensaverWindowCount > 0
++    timeout: 2
++    respectInhibitors: false
++    property bool settled: false
++    onEnabledChanged: settled = false
++    onIsIdleChanged: {
++      if (isIdle) {
++        settled = true
++      } else if (settled) {
++        settled = false
++        root.logEvent("screensaver-wake", "user returned")
++        root.runProcess(lockProcess, "lock-on-wake", "omarchy-toggle-enabled lock-after-screensaver && omarchy-system-lock")
++      }
++    }
++  }
++
+   IdleMonitor {
+     id: idleMonitor
+     enabled: root.idleEnabled && root.idleTimersEnabled

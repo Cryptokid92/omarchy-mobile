@@ -1,0 +1,52 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Build the [omandroid] pacman repository in out/repo/aarch64: our packages,
+# built natively on the phone (the only aarch64 builder for now), each signed
+# with the Omandroid key in keys/, plus a signed omandroid.db.
+#   tools/repo-build [package-dir...]   (default: every package but mesa)
+# Mesa takes hours to build, so its already-built packages are collected from
+# the phone's build directory instead (packages/mesa/README.md).
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+export GNUPGHOME=$PWD/keys/gnupg
+key=$(cat keys/fingerprint)
+repo=out/repo/aarch64
+ssh=tools/phone-ssh
+build=/home/omandroid/build/pkgs
+
+dirs=("$@")
+((${#dirs[@]})) || dirs=(packages/omandroid-keyring packages/omandroid-shell packages/omandroid-device-cheetah)
+
+mkdir -p "$repo"
+fetch() { "$ssh" "cat '$1'" >"$repo/$(basename "$1")"; }
+
+for dir in "${dirs[@]}"; do
+  name=$(basename "$dir")
+  echo "==> $name"
+  "$ssh" "rm -rf $build/$name && mkdir -p $build && chown omandroid: $build"
+  tar cf - --exclude="./$name/pkg" --exclude="./$name/src/build" --exclude="*.pkg.tar.*" \
+    -C "$(dirname "$dir")" "./$name" | "$ssh" "tar xf - -C $build --no-same-owner && chown -R omandroid: $build/$name"
+  # --nodeps: runtime dependencies (e.g. omandroid-keyring) come from this
+  # very repository, so they needn't be installed on the builder.
+  "$ssh" "su - omandroid -c 'cd $build/$name && makepkg -f --nodeps --noconfirm' 2>&1 | tail -1"
+  files=$("$ssh" "ls $build/$name/*.pkg.tar.* 2>/dev/null" || true)
+  [[ -n $files ]] || { echo "$name: no package built" >&2; exit 1; }
+  for file in $files; do fetch "$file"; done
+done
+
+echo "==> mesa (prebuilt on the phone)"
+for file in $("$ssh" "ls /home/omandroid/build/mesa/*.pkg.tar.* 2>/dev/null"); do
+  [[ -f $repo/$(basename "$file") ]] || fetch "$file"
+done
+
+echo "==> signing"
+for package in "$repo"/*.pkg.tar.*; do
+  [[ $package == *.sig ]] && continue
+  [[ -f $package.sig ]] || gpg --batch --yes --local-user "$key" --detach-sign "$package"
+done
+
+echo "==> database"
+rm -f "$repo"/omandroid.db* "$repo"/omandroid.files*
+repo-add --quiet --sign --key "$key" "$repo/omandroid.db.tar.gz" $(ls "$repo"/*.pkg.tar.* | grep -v '\.sig$')
+ls -1 "$repo" | grep -v '\.sig$'

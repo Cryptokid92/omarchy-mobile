@@ -7,7 +7,9 @@ pkgdesc="Omandroid support for the Google Pixel 7 Pro (cheetah): boot-slot succe
 arch=(aarch64)
 url="https://github.com/derekross/omandroid"
 license=(MIT Apache-2.0)
-depends=(bash systemd util-linux)
+depends=(bash systemd util-linux omandroid-keyring)
+backup=(etc/pacman.d/omandroid-mirrorlist)
+install=omandroid-device-cheetah.install
 makedepends=(gcc python)
 
 build() {

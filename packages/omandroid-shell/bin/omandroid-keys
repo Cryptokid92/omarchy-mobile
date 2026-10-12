@@ -45,6 +45,13 @@ case "${1:-}" in
   power-up)
     if [[ -f $state/chord ]]; then
       rm -f "$state/chord"
+    elif [[ $(omarchy-shell lock isLocked 2>/dev/null) == "true" ]]; then
+      # Locked: the menu would open behind the lock screen and greet the
+      # user after unlocking. Power just wakes the lock screen.
+      :
+    elif pgrep -f '[o]rg.omarchy.screensaver' >/dev/null; then
+      # Screensaver on: power wakes the phone to its lock, like a tap.
+      omarchy-system-lock
     else
       omarchy-menu toggle system
     fi
