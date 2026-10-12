@@ -225,23 +225,29 @@ Item {
 
       // Swipe up on the dock for recent apps (omandroid.switcher), as on
       // Android; a tap still opens the drawer.
-      DragHandler {
-        target: null
-        xAxis.enabled: false
-        property real swipeY: 0
-        onActiveTranslationChanged: swipeY = activeTranslation.y
-        onActiveChanged: {
-          if (active) swipeY = 0
-          else if (swipeY < -24 && root.shell && typeof root.shell.summon === "function")
-            root.shell.summon("omandroid.switcher", "{}")
-        }
-      }
-
-      SearchPill {
+      Item {
         anchors.fill: parent
-        anchors.margins: Style.spacing.xxl
-        placeholder: (root.hasAgent ? "Search apps or ask " + root.agentName + "…" : "Search apps…")
-        onTapped: root.expand()
+
+        DragHandler {
+          target: null
+          xAxis.enabled: false
+          property real swipeY: 0
+          onActiveTranslationChanged: swipeY = activeTranslation.y
+          onActiveChanged: {
+            if (active) swipeY = 0
+            // Through the CLI, like Omarchy's background does: a plugin may
+            // only summon panels it owns, and the switcher is its own plugin.
+            else if (swipeY < -24)
+              Quickshell.execDetached(["omarchy-shell", "shell", "summon", "omandroid.switcher", "{}"])
+          }
+        }
+
+        SearchPill {
+          anchors.fill: parent
+          anchors.margins: Style.spacing.xxl
+          placeholder: (root.hasAgent ? "Search apps or ask " + root.agentName + "…" : "Search apps…")
+          onTapped: root.expand()
+        }
       }
     }
   }

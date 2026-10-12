@@ -104,3 +104,8 @@ Made on the development laptop to give the phone internet over USB. Revert when 
 - **Chromium's first-run dialogs don't fit.** Its "Additional Terms of Service" page (blank text in open-source builds) put Accept off-screen and blocked an OAuth login. `omandroid-setup-user` adds `--no-first-run` to `~/.config/chromium-flags.conf`.
 - **System dialogs aren't phone-shaped.** gcr-prompter (keyring), polkit and portal dialogs are GTK windows sized for desktops. Now that every window is maximized they fit the width, but they'll want a phone-friendly look.
 - **Stale `/usr/local/bin/omandroid-setup-user` (fixed 2026-10-11).** An early hand-copied version shadowed the packaged `/usr/bin` one on PATH, so newly added setup steps were silently skipped when the script ran by name. Removed. `omandroid-boot-success`, `omandroid-bootctl` and `reboot-to` still live only in `/usr/local/bin` until `omandroid-device-cheetah` is installed with pacman.
+- **Shell plugin development gotchas (2026-10-11).**
+  - Omarchy's live plugin reload ("Local plugin changed, reloading") can keep running the old code. After changing a plugin's QML, restart the shell (`omarchy-restart-shell`) before testing.
+  - A Qt pointer handler (DragHandler, TapHandler) declared directly on a Quickshell window gets no events. Put it on an Item inside the window.
+  - A plugin may only summon panels it owns (`_summon` checks `pluginOwnsTarget`). To open another plugin, run `omarchy-shell shell summon <id>`, as Omarchy's background does.
+  - To debug touch, `console.log` is hard to read back (binary `log.qslog`, needs `qs log`). Appending to a file through `Quickshell.execDetached` gave a clear trace.
