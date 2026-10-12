@@ -524,10 +524,11 @@ Item {
       elide: Text.ElideRight
     }
 
-    MouseArea {
+    // A TapHandler, not a MouseArea: it lets go once the touch turns into a
+    // drag, so the dock's swipe-up (recent apps) still sees it.
+    TapHandler {
       id: pillTouch
-      anchors.fill: parent
-      onClicked: pill.tapped()
+      onTapped: pill.tapped()
     }
   }
 
