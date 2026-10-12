@@ -128,3 +128,10 @@ if omarchy-done ensure omandroid-menu-pin; then
     sed -i '0,/^{/s//{\n  "system.pin": {"icon":"󰌾","label":"PIN","description":"Set or change the PIN that unlocks this phone","action":"omandroid-set-pin"},/' "$extension"
   fi
 fi
+
+# Like Android, waking the phone from its screensaver shows the PIN lock
+# (patch 0006 honours the lock-after-screensaver toggle). Set once.
+if omarchy-done ensure omandroid-lock-after-screensaver; then
+  mkdir -p ~/.local/state/omarchy/toggles
+  touch ~/.local/state/omarchy/toggles/lock-after-screensaver
+fi
