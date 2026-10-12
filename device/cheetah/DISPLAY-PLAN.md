@@ -608,3 +608,10 @@ All 16 reads returned cleanly (no SError):
 | CMU_DPU / CMU_DISP option `+0x800` | 0xf1000000 | ABL's setting, to compare after D1b registers the CMUs |
 
 Both open questions about ABL's DSIM state are answered in the driver's favour: D1b can proceed.
+
+## D1b and D2 results (2026-10-11, on the phone)
+
+- **D1b passes.** With `dsi0`, `cmu_dpu` and `cmu_disp` okay: both CMUs register (52 dpu/disp clocks in `clk_summary`) and their option registers still read 0xf1000000 (no auto-gating change, picture unaffected). `gs-dsim-cmd` attaches and dumps an idle DSIM (FIFOs empty, PKT_GO_EN clear); `panel-samsung-s6e3hc4` logs "taken over from the bootloader" and creates `/sys/class/backlight/1c2c0000.dsi.0` (1023 of 2047).
+- **Found in D1b:** with `dsi0` enabled, fw_devlink made simplefb wait for the panel device (the `panel` phandle that gives simplefb the panel size), which only appears with the DSI host driver. simpledrm probed late, so the boot splash and Plymouth had no framebuffer and Hyprland started without a display. Fixed with `post-init-providers = <&panel>` on the framebuffer node.
+- **D2 passes.** With `allow_tx`: brightness 300 then 1023, first with the DECON trigger masked, then with it running. Every write returned 0, no FIFO timeout or -EBUSY, FIFOs empty and PKT_GO_EN clear afterwards, and the user saw the panel dim. HS commands work as ABL left them (no CMD_LPDT needed).
+- Next: make `allow_tx` the default once D3 passes, a quick-settings brightness slider on `/sys/class/backlight`, `systemd-backlight` restore, then D3 (display off/on for DPMS).
