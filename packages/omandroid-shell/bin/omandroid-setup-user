@@ -69,7 +69,7 @@ if omarchy-done ensure omandroid-osk-input-method; then
 fi
 
 # Keyboard as tall as Android's (about a third of the screen): squeekboard's
-# portrait height multiplier, at its maximum. Seeded once.
+# portrait height multiplier. Seeded once.
 if omarchy-done ensure omandroid-osk-size; then
-  gsettings set sm.puri.Squeekboard scale-in-vertical-screen-orientation 2.0
+  gsettings set sm.puri.Squeekboard scale-in-vertical-screen-orientation 1.85
 fi
