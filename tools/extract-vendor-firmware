@@ -1,0 +1,186 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# extract-vendor-firmware: copy the Wi-Fi and Bluetooth firmware the Pixel 7 Pro
+# (cheetah) needs out of a Google factory image, on the user's own machine.
+#
+# Google's firmware is not ours to redistribute, so Omandroid never ships it.
+# Like LineageOS's extract-files, this pulls it from an image the user already
+# has (the factory zip from developers.google.com/android/images, or the
+# image-*.zip inside it) and renames it to what the mainline drivers request:
+#
+#   vendor/firmware/fw_bcmdhd.bin     -> brcm/brcmfmac4389c1-pcie.<board>.bin       (brcmfmac)
+#   vendor/firmware/bcmdhd.cal        -> brcm/brcmfmac4389c1-pcie.<board>.txt       (NVRAM)
+#   vendor/firmware/bcmdhd_clm.blob   -> brcm/brcmfmac4389c1-pcie.<board>.clm_blob  (regulatory)
+#   vendor/firmware/brcm/BCM.hcd      -> brcm/BCM.<board>.hcd                       (btbcm)
+#
+# <board> is the first string of the DT root compatible ("google,gs201-cheetah"),
+# which brcmfmac and btbcm both try before the generic name.
+#
+# Output is a tree rooted at /, under usr/lib/firmware/updates (searched before
+# linux-firmware's files, and not owned by any package). Nothing touches the phone.
+#
+# Needs: unzip, debugfs (e2fsprogs); simg2img if vendor.img is sparse;
+# lpunpack if the image only has super.img; fsck.erofs (erofs-utils) if vendor is EROFS.
+set -euo pipefail
+
+BOARD="google,gs201-cheetah"
+DEVICE="cheetah"
+FW_BASE="brcmfmac4389c1-pcie"
+DEST_REL="usr/lib/firmware/updates/brcm"
+
+# source path in the vendor partition -> name under $DEST_REL
+MAP=(
+  "firmware/fw_bcmdhd.bin|$FW_BASE.$BOARD.bin"
+  "firmware/bcmdhd.cal|$FW_BASE.$BOARD.txt"
+  "firmware/bcmdhd_clm.blob|$FW_BASE.$BOARD.clm_blob"
+  "firmware/brcm/BCM.hcd|BCM.$BOARD.hcd"
+)
+
+usage() {
+  cat <<USAGE
+Usage: extract-vendor-firmware [-o OUTDIR] [-w WORKDIR] [-f] SOURCE
+
+  SOURCE   Google factory zip (cheetah-*-factory-*.zip), the image-cheetah-*.zip
+           inside it, or a raw/sparse vendor.img
+  -o DIR   staging root to write into (default: ./out/vendor-firmware)
+  -w DIR   scratch directory for the ~1 GB vendor.img (default: a temp dir in \$TMPDIR)
+  -f       skip the android-info.txt board=$DEVICE check
+
+Install on the phone (from the omandroid repo):
+  tar -C OUTDIR -cf - usr | tools/phone-ssh 'tar -C / -xf -'
+USAGE
+}
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null || die "$1 not found ($2)"; }
+
+OUT="./out/vendor-firmware" WORK="" FORCE=""
+while getopts "o:w:fh" opt; do
+  case $opt in
+    o) OUT=$OPTARG ;;
+    w) WORK=$OPTARG ;;
+    f) FORCE=1 ;;
+    h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+[[ $# -eq 1 ]] || { usage >&2; exit 2; }
+SRC=$(readlink -f "$1")
+[[ -f "$SRC" ]] || die "no such file: $1"
+
+if [[ -n "$WORK" ]]; then
+  mkdir -p "$WORK"
+  WORK=$(mktemp -d "$WORK/xvf.XXXXXX")
+else
+  WORK=$(mktemp -d "${TMPDIR:-/tmp}/xvf.XXXXXX")
+fi
+trap 'rm -rf "$WORK"' EXIT
+
+# Read 4 bytes at an offset as a little-endian hex word.
+magic_at() { od -An -tx4 -j "$2" -N4 "$1" | tr -d ' \n'; }
+
+# A zip member whose name ends in $2 (first match), or nothing.
+zip_member() { unzip -Z1 "$1" | grep -E "(^|/)$2\$" | head -1 || true; }
+
+# Get vendor.img out of SOURCE into $WORK/vendor.img.
+fetch_vendor() {
+  local src=$1 m inner
+  case "$(magic_at "$src" 0)" in
+    04034b50) ;;                                  # zip
+    *) cp --reflink=auto "$src" "$WORK/vendor.img"; return ;;
+  esac
+  need unzip "install unzip"
+  # The outer factory zip wraps image-<device>-*.zip; the inner one has the images.
+  inner=$(zip_member "$src" "image-[^/]*\.zip")
+  if [[ -n "$inner" ]]; then
+    say "Unpacking $inner from the factory zip"
+    unzip -p "$src" "$inner" > "$WORK/image.zip"
+    src="$WORK/image.zip"
+  fi
+  m=$(zip_member "$src" "android-info\.txt")
+  if [[ -n "$m" && -z "$FORCE" ]]; then
+    unzip -p "$src" "$m" | grep -qE "^require board=(.*\|)?$DEVICE(\|.*)?\$" ||
+      die "this image is not for $DEVICE (android-info.txt); use -f to override"
+  fi
+  m=$(zip_member "$src" "vendor\.img")
+  if [[ -n "$m" ]]; then
+    say "Unpacking vendor.img"
+    unzip -p "$src" "$m" > "$WORK/vendor.img"
+    return
+  fi
+  m=$(zip_member "$src" "super\.img")
+  [[ -n "$m" ]] || die "no vendor.img or super.img in $(basename "$src")"
+  need lpunpack "install android-tools"
+  say "Unpacking super.img and its vendor partition"
+  unzip -p "$src" "$m" > "$WORK/super.img"
+  if [[ "$(magic_at "$WORK/super.img" 0)" == ed26ff3a ]]; then
+    need simg2img "install android-tools"
+    simg2img "$WORK/super.img" "$WORK/super.raw" && mv "$WORK/super.raw" "$WORK/super.img"
+  fi
+  mkdir -p "$WORK/super"
+  lpunpack -p vendor_a "$WORK/super.img" "$WORK/super" 2>/dev/null ||
+    lpunpack -p vendor "$WORK/super.img" "$WORK/super"
+  mv "$WORK/super/"vendor*.img "$WORK/vendor.img"
+  rm -rf "$WORK/super" "$WORK/super.img"
+}
+
+fetch_vendor "$SRC"
+img="$WORK/vendor.img"
+if [[ "$(magic_at "$img" 0)" == ed26ff3a ]]; then
+  need simg2img "install android-tools"
+  say "Converting sparse vendor.img"
+  simg2img "$img" "$img.raw" && mv "$img.raw" "$img"
+fi
+
+# Copy one file out of the vendor filesystem ($1, no leading /) to $2.
+if [[ "$(od -An -tx2 -j 1080 -N2 "$img" | tr -d ' ')" == ef53 ]]; then
+  need debugfs "install e2fsprogs"
+  say "vendor.img is ext4; reading it with debugfs (no mount)"
+  get_file() {
+    debugfs -R "dump /$1 $2" "$img" 2>/dev/null
+    [[ -s "$2" ]]
+  }
+elif [[ "$(magic_at "$img" 1024)" == e0f5e1e2 ]]; then
+  need fsck.erofs "install erofs-utils"
+  say "vendor.img is EROFS; extracting it with fsck.erofs"
+  fsck.erofs --extract="$WORK/vendor" --no-preserve "$img" >/dev/null
+  get_file() { [[ -s "$WORK/vendor/$1" ]] && cp "$WORK/vendor/$1" "$2"; }
+else
+  die "vendor.img is neither ext4 nor EROFS"
+fi
+
+# The board list in android-info.txt is shared by pantah devices; the vendor
+# partition itself says which device it was built for.
+if get_file build.prop "$WORK/build.prop"; then
+  dev=$(sed -n 's/^ro.product.vendor.device=//p' "$WORK/build.prop" | head -1)
+  [[ "$dev" == "$DEVICE" || -n "$FORCE" ]] ||
+    die "vendor partition is for '${dev:-unknown}', not $DEVICE; use -f to override"
+  say "Vendor partition: $(sed -n 's/^ro.vendor.build.fingerprint=//p' "$WORK/build.prop" | head -1)"
+fi
+
+dest="$OUT/$DEST_REL"
+mkdir -p "$dest"
+for entry in "${MAP[@]}"; do
+  from=${entry%%|*} to=${entry#*|}
+  get_file "$from" "$dest/$to" || die "/vendor/$from is missing from this image"
+  chmod 0644 "$dest/$to"
+  printf '  /vendor/%-26s -> /%s/%s\n' "$from" "$DEST_REL" "$to"
+done
+
+# Sanity checks: right chip, text NVRAM.
+grep -aq '4389c1-roml' "$dest/$FW_BASE.$BOARD.bin" ||
+  die "fw_bcmdhd.bin is not a BCM4389C1 PCIe firmware"
+grep -aq 'BCM4389C1' "$dest/BCM.$BOARD.hcd" ||
+  die "BCM.hcd is not a BCM4389C1 Bluetooth patch"
+grep -aq '^NVRAMRev=' "$dest/$FW_BASE.$BOARD.txt" ||
+  die "bcmdhd.cal does not look like a Broadcom text NVRAM"
+
+ver=$(grep -ao 'Version=[0-9.]* ([^)]*)' "$dest/$FW_BASE.$BOARD.bin" | head -1)
+bt=$(grep -ao 'BCM4389C1 [^[]*' "$dest/BCM.$BOARD.hcd" | head -1)
+(cd "$dest" && sha256sum -- * > "$OUT/vendor-firmware.sha256")
+say "Wi-Fi firmware: ${ver:-unknown version}"
+say "Bluetooth patch: ${bt:-unknown version}"
+say "Staged in $OUT (checksums in $OUT/vendor-firmware.sha256)"
+echo "This is Google's proprietary firmware from your own factory image. Do not redistribute it."
