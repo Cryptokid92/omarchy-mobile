@@ -45,7 +45,7 @@ index 78cf757..1552b48 100755
  # with it. Hand focus back to the monitor that had it once they are all gone.
  # The class goes through the environment, since in argv the screensaver's pgrep and pkill would match it.
 diff --git i/bin/omarchy-screensaver w/bin/omarchy-screensaver
-index acd3868..bd9dd9d 100755
+index acd3868..8802d3a 100755
 --- i/bin/omarchy-screensaver
 +++ w/bin/omarchy-screensaver
 @@ -6,8 +6,34 @@ screensaver_in_focus() {
@@ -94,7 +94,25 @@ index acd3868..bd9dd9d 100755
  
  hyprctl eval 'hl.config({ cursor = { invisible = true } })' &>/dev/null || hyprctl keyword cursor:invisible true &>/dev/null
  
-@@ -41,7 +70,26 @@ while true; do
+@@ -33,6 +62,17 @@ wait_for_terminal_resize() {
+   done
+ }
+ 
++# The window rule makes the screensaver fullscreen, but a surface that holds
++# focus as it opens (e.g. a launcher being dismissed) can leave it a plain
++# floating window. Make sure, before measuring the terminal.
++ensure_fullscreen() {
++  local window
++  window=$(hyprctl clients -j 2>/dev/null | jq -r '[.[] | select(.class == "org.omarchy.screensaver" and .fullscreen == 0)][0].address // empty')
++  [[ -n $window ]] && hyprctl dispatch "hl.dsp.window.fullscreen({ mode = \"fullscreen\", window = \"address:$window\" })" &>/dev/null
++  return 0
++}
++
++ensure_fullscreen
+ wait_for_terminal_resize
+ 
+ while true; do
+@@ -41,7 +81,26 @@ while true; do
      --random-effect --no-eol --no-restore-cursor &
  
    while pgrep -t "${tty#/dev/}" -x ttfx >/dev/null; do
