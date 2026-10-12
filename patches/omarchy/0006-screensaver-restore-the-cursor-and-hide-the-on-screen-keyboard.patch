@@ -1,8 +1,25 @@
 diff --git i/bin/omarchy-launch-screensaver w/bin/omarchy-launch-screensaver
-index 78cf757..962102d 100755
+index 78cf757..1552b48 100755
 --- i/bin/omarchy-launch-screensaver
 +++ w/bin/omarchy-launch-screensaver
-@@ -63,7 +63,10 @@ while read -r m special; do
+@@ -11,6 +11,16 @@ if omarchy-toggle-enabled screensaver-off && [[ $1 != "force" ]]; then
+ fi
+ 
+ focused=$(omarchy-hyprland-monitor-focused)
++
++# Touch devices: an on-screen keyboard (squeekboard) pops up for whatever
++# terminal has focus, the screensaver's included. Turn it off; the
++# screensaver turns it back on when it exits (the marker says it should).
++osk_key="org.gnome.desktop.a11y.applications screen-keyboard-enabled"
++osk_marker="${XDG_RUNTIME_DIR:-/tmp}/omarchy-screensaver-osk-off"
++if busctl --user status sm.puri.OSK0 &>/dev/null && [[ $(gsettings get $osk_key 2>/dev/null) == true ]]; then
++  touch "$osk_marker"
++  gsettings set $osk_key false
++fi
+ terminal=$(xdg-terminal-exec --print-id)
+ 
+ case $terminal in
+@@ -63,7 +73,10 @@ while read -r m special; do
      hypr_exec ghostty --class=org.omarchy.screensaver --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size=18 -e omarchy-screensaver
      ;;
    *foot*)
@@ -14,11 +31,24 @@ index 78cf757..962102d 100755
      ;;
    *kitty*)
      hypr_exec kitty --class=org.omarchy.screensaver --override font_size=18 --override window_padding_width=0 -e omarchy-screensaver
+@@ -75,6 +88,12 @@ done < <(hyprctl monitors -j | jq -r '.[] | "\(.name) \(.specialWorkspace.name)"
+ 
+ hypr_focus_monitor "$focused"
+ 
++# No screensaver came up to turn the on-screen keyboard back on: do it here.
++if [[ -f $osk_marker ]] && ! pgrep -f '[o]rg.omarchy.screensaver' >/dev/null; then
++  rm -f "$osk_marker"
++  gsettings set $osk_key true
++fi
++
+ # Emptying a special workspace focuses its monitor, so the last screensaver to close would take focus
+ # with it. Hand focus back to the monitor that had it once they are all gone.
+ # The class goes through the environment, since in argv the screensaver's pgrep and pkill would match it.
 diff --git i/bin/omarchy-screensaver w/bin/omarchy-screensaver
-index acd3868..6be340e 100755
+index acd3868..bf7ffd6 100755
 --- i/bin/omarchy-screensaver
 +++ w/bin/omarchy-screensaver
-@@ -6,8 +6,17 @@ screensaver_in_focus() {
+@@ -6,8 +6,27 @@ screensaver_in_focus() {
    hyprctl activewindow -j | jq -e '.class == "org.omarchy.screensaver"' >/dev/null 2>&1
  }
  
@@ -31,13 +61,23 @@ index acd3868..6be340e 100755
 +  fi
 +}
 +
++# Turn the on-screen keyboard back on if omarchy-launch-screensaver turned it off.
++restore_osk() {
++  local marker="${XDG_RUNTIME_DIR:-/tmp}/omarchy-screensaver-osk-off"
++  if [[ -f $marker ]]; then
++    rm -f "$marker"
++    gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true &>/dev/null || true
++  fi
++}
++
  exit_screensaver() {
 -  hyprctl eval 'hl.config({ cursor = { invisible = false } })' &>/dev/null || hyprctl keyword cursor:invisible false &>/dev/null || true
 +  restore_cursor
++  restore_osk
    pkill -x ttfx 2>/dev/null
    pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null
    exit 0
-@@ -17,6 +26,9 @@ exit_screensaver() {
+@@ -17,6 +36,9 @@ exit_screensaver() {
  trap exit_screensaver SIGINT SIGTERM SIGHUP SIGQUIT
  
  printf '\033]11;rgb:00/00/00\007'  # Set background color to black
@@ -47,19 +87,7 @@ index acd3868..6be340e 100755
  
  hyprctl eval 'hl.config({ cursor = { invisible = true } })' &>/dev/null || hyprctl keyword cursor:invisible true &>/dev/null
  
-@@ -35,13 +47,29 @@ wait_for_terminal_resize() {
- 
- wait_for_terminal_resize
- 
-+# Touch devices: focusing the terminal brings up the on-screen keyboard
-+# (squeekboard's sm.puri.OSK0), which would cover the screensaver.
-+if busctl --user status sm.puri.OSK0 &>/dev/null; then
-+  (sleep 0.5; busctl --user call sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 SetVisible b false) &>/dev/null &
-+fi
-+
- while true; do
-   ttfx -i ~/.config/omarchy/branding/screensaver.txt \
-     --frame-rate 120 --canvas-width 0 --canvas-height 0 --reuse-canvas --anchor-canvas c --anchor-text c\
+@@ -41,7 +63,18 @@ while true; do
      --random-effect --no-eol --no-restore-cursor &
  
    while pgrep -t "${tty#/dev/}" -x ttfx >/dev/null; do
@@ -71,6 +99,7 @@ index acd3868..6be340e 100755
 +      if omarchy-toggle-enabled lock-after-screensaver; then
 +        # The lock stops this screensaver itself, before exit_screensaver.
 +        restore_cursor
++        restore_osk
 +        omarchy-system-lock
 +      fi
 +      exit_screensaver
