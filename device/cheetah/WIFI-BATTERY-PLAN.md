@@ -811,7 +811,10 @@ $O/scripts/dtc/fdtoverlay -i "$D.default" -o "$D" out/wifi-pcie-test.dtbo
 bin/omandroid images && bin/omandroid push
 tools/phone-ssh 'ls /sys/bus/platform/devices | grep -E "14520000|14550000"; lsmod | grep gs201'
 #       pass: both devices exist; phy_gs201_pcie may be loaded (it only maps registers), pcie_gs201 not
-tools/phone-ssh 'devmem 0x145202c8'    # ELBI LTSSM: expect 0x0 (not 0x11)
+# DO NOT read the controller's registers here (e.g. devmem 0x145202c8): before
+# pcie_gs201 powers and clocks the block, the read hangs the bus and the phone
+# with it (no panic, so no auto-reboot; recover by holding Power ~30 s). This
+# happened on 2026-10-11. Read ELBI/LTSSM only after W1.3's modprobe.
 #       rollback: cp "$D.default" "$D"; bin/omandroid images && bin/omandroid push
 #       (bin/omandroid kernel also rebuilds the DTB without the overlay)
 
