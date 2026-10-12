@@ -86,6 +86,14 @@ edit("LockView.qml", [
      "    Keypad {\n      id: numberPad\n", 1),
 ])
 
+# Touch-only devices: no hover. The lock surface appearing under a still,
+# hidden pointer counted as movement and woke the display just after a power
+# button press had turned it off. Taps still wake it.
+edit("LockView.qml", [
+    ("      hoverEnabled: true\n      onClicked: { root.wakeRequested(); root.forcePasswordFocus() }\n",
+     "      hoverEnabled: !root.keypad\n      onClicked: { root.wakeRequested(); root.forcePasswordFocus() }\n", 1),
+])
+
 edit("Service.qml", [
     ("  property bool fingerprintConfigured: false\n",
      "  property bool fingerprintConfigured: false\n"

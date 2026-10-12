@@ -38,6 +38,12 @@ screensaver_up() {
 
 # The panel is off when its backlight's bl_power says so (4); without one,
 # ask Hyprland whether the display is powered.
+# Light the locked display like a touch on the lock screen would, so its
+# blank timer runs again (patches/omarchy/0009); plain "on" otherwise.
+wake_locked() {
+  [[ $(omarchy-shell lock wake 2>/dev/null) == "ok" ]] || omarchy-brightness-display on
+}
+
 screen_off() {
   local device
   device=$(omarchy-hw-display 2>/dev/null)
@@ -61,7 +67,7 @@ chord() {
 long_press() {
   touch "$state/long"
   if locked; then
-    omarchy-brightness-display on
+    wake_locked
   else
     omarchy-menu toggle system
   fi
@@ -72,7 +78,7 @@ short_press() {
     omarchy-system-lock
   elif locked; then
     if screen_off; then
-      omarchy-brightness-display on
+      wake_locked
     else
       omarchy-brightness-display off
     fi

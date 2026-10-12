@@ -73,7 +73,7 @@ index 0000000..eed36cb
 +  }
 +}
 diff --git i/shell/plugins/lock/LockView.qml w/shell/plugins/lock/LockView.qml
-index ecec660..c88473d 100644
+index ecec660..8d45f68 100644
 --- i/shell/plugins/lock/LockView.qml
 +++ w/shell/plugins/lock/LockView.qml
 @@ -24,8 +24,10 @@ Item {
@@ -98,7 +98,13 @@ index ecec660..c88473d 100644
    }
  
    function clearPassword() {
-@@ -152,11 +155,50 @@ Item {
+@@ -147,16 +150,55 @@ Item {
+ 
+     MouseArea {
+       anchors.fill: parent
+-      hoverEnabled: true
++      hoverEnabled: !root.keypad
+       onClicked: { root.wakeRequested(); root.forcePasswordFocus() }
        onPositionChanged: root.wakeRequested()
      }
  
