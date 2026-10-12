@@ -231,7 +231,10 @@ Item {
       exclusionMode: ExclusionMode.Auto
       color: Commons.Color.bar.background
       WlrLayershell.namespace: "omandroid-dock"
-      WlrLayershell.layer: WlrLayer.Top
+      // Bottom, not Top: its exclusive zone still keeps windows off it, and
+      // fullscreen windows (the screensaver, video) cover it. On Top it was
+      // drawn over a fullscreen window when it re-mapped after the drawer.
+      WlrLayershell.layer: WlrLayer.Bottom
 
       // Swipe up on the dock for recent apps (omandroid.switcher), as on
       // Android; a tap still opens the drawer.
