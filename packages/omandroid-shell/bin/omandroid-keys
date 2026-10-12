@@ -1,12 +1,17 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# Phone hardware-key gestures, called by Hyprland binds (hypr/phone.lua):
-#   power + volume down together  -> screenshot (Omarchy's, full screen)
-#   power on its own              -> Omarchy's system menu
-# Hyprland can't bind a chord of two plain keys, so each key reports here and
-# the chord is worked out from when the keys went down. The menu opens when
-# power is released (so a chord never opens it); Hyprland cancels that release
-# bind once another key goes down, so the screenshot can't wait for it.
+# Phone hardware-key gestures, called by Hyprland binds (hypr/phone.lua), as
+# on Android:
+#   power, short       unlocked: lock and turn the screen off
+#                      locked: screen off if it's on, on (PIN pad) if it's off
+#                      screensaver up: lock (it wakes to the PIN pad)
+#   power, held 0.6 s  unlocked: Omarchy's system menu, while still held
+#                      locked: screen on
+#   power + volume down together: screenshot (Omarchy's, full screen)
+# Hyprland can't bind a chord of two plain keys or a long press that fires
+# while held, so each key reports here and the gesture is worked out from
+# when the keys went down. Hyprland cancels power's release bind once another
+# key goes down, so the chord acts on its own, not on release.
 set -u
 
 state="${XDG_RUNTIME_DIR:-/tmp}/omandroid-keys"
@@ -16,9 +21,31 @@ now() { date +%s%3N; }
 
 # Keys count as pressed together within this many milliseconds.
 window=500
+# A press held this long is a long press.
+hold=0.6
 
 recent() {
   [[ -f $state/$1 ]] && (($(now) - $(<"$state/$1") <= window))
+}
+
+locked() {
+  [[ $(omarchy-shell lock isLocked 2>/dev/null) == "true" ]]
+}
+
+screensaver_up() {
+  pgrep -f '[o]rg.omarchy.screensaver' >/dev/null
+}
+
+# The panel is off when its backlight's bl_power says so (4); without one,
+# ask Hyprland whether the display is powered.
+screen_off() {
+  local device
+  device=$(omarchy-hw-display 2>/dev/null)
+  if [[ -n $device && -r /sys/class/backlight/$device/bl_power ]]; then
+    [[ $(</sys/class/backlight/"$device"/bl_power) != 0 ]]
+  else
+    ! hyprctl monitors -j 2>/dev/null | jq -e 'all(.dpmsStatus)' >/dev/null
+  fi
 }
 
 chord() {
@@ -31,11 +58,51 @@ chord() {
   (sleep 0.4; omarchy-capture-screenshot fullscreen) >/dev/null 2>&1 &
 }
 
+long_press() {
+  touch "$state/long"
+  if locked; then
+    omarchy-brightness-display on
+  else
+    omarchy-menu toggle system
+  fi
+}
+
+short_press() {
+  if screensaver_up; then
+    omarchy-system-lock
+  elif locked; then
+    if screen_off; then
+      omarchy-brightness-display on
+    else
+      omarchy-brightness-display off
+    fi
+  else
+    omarchy-system-lock
+    # Turn the screen off once the lock is up: the lock wakes the display as
+    # it appears, which would undo an earlier "off".
+    for _ in $(seq 30); do
+      omarchy-shell lock status 2>/dev/null | grep -q '"secure":true' && break
+      sleep 0.1
+    done
+    sleep 0.3
+    omarchy-brightness-display off
+  fi
+}
+
 case "${1:-}" in
   power-down)
-    rm -f "$state/chord"
-    now >"$state/power"
-    recent volume-down && chord
+    rm -f "$state/chord" "$state/long"
+    press=$(now)
+    echo "$press" >"$state/power"
+    if recent volume-down; then
+      chord
+    else
+      # Long press: still the same press, still held, no chord in between.
+      (
+        sleep "$hold"
+        [[ $(cat "$state/power" 2>/dev/null) == "$press" && ! -f $state/chord ]] && long_press
+      ) >/dev/null 2>&1 &
+    fi
     ;;
   volume-down)
     now >"$state/volume-down"
@@ -45,15 +112,10 @@ case "${1:-}" in
   power-up)
     if [[ -f $state/chord ]]; then
       rm -f "$state/chord"
-    elif [[ $(omarchy-shell lock isLocked 2>/dev/null) == "true" ]]; then
-      # Locked: the menu would open behind the lock screen and greet the
-      # user after unlocking. Power just wakes the lock screen.
-      :
-    elif pgrep -f '[o]rg.omarchy.screensaver' >/dev/null; then
-      # Screensaver on: power wakes the phone to its lock, like a tap.
-      omarchy-system-lock
+    elif [[ -f $state/long ]]; then
+      rm -f "$state/long"
     else
-      omarchy-menu toggle system
+      short_press
     fi
     rm -f "$state/power"
     ;;

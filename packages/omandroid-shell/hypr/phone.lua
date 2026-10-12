@@ -21,9 +21,10 @@ o.launch_on_start(
     .. "omarchy-system-lock'"
 )
 
--- Hardware keys, like Android: power + volume down takes a screenshot, and
--- power alone opens Omarchy's system menu when released (so the chord never
--- opens it). omandroid-keys works out the chord.
+-- Hardware keys, like Android: a short power press locks and turns the
+-- screen off (or wakes a locked phone), holding power opens Omarchy's system
+-- menu, and power + volume down takes a screenshot. omandroid-keys works out
+-- which gesture it was.
 hl.unbind("XF86PowerOff")
 o.bind("XF86PowerOff", "Power key", "omandroid-keys power-down", { locked = true })
 o.bind("XF86PowerOff", "System menu", "omandroid-keys power-up", { locked = true, release = true })
