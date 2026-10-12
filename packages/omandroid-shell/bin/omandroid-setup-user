@@ -91,11 +91,15 @@ if omarchy-done ensure omandroid-lock-keypad; then
 fi
 
 # Chromium won't lay out narrower than about 500 px, wider than the phone's
-# 480 px (at scale 3), so its window ran off the right edge. At 2.5 it gets
-# about 550 px of layout width. Added once.
-if omarchy-done ensure omandroid-chromium-scale; then
-  grep -q -- '^--force-device-scale-factor=' ~/.config/chromium-flags.conf 2>/dev/null ||
-    echo --force-device-scale-factor=2.5 >>~/.config/chromium-flags.conf
+# 480 px (at scale 3), so its window ran off the right edge. On Wayland its
+# --force-device-scale-factor multiplies the output scale, so 0.83 gives about
+# 550 px of layout width (2.5, the first try, made everything 2.5x bigger).
+if omarchy-done ensure omandroid-chromium-scale-2; then
+  if grep -q -- '^--force-device-scale-factor=' ~/.config/chromium-flags.conf 2>/dev/null; then
+    sed -i 's/^--force-device-scale-factor=.*/--force-device-scale-factor=0.83/' ~/.config/chromium-flags.conf
+  else
+    echo --force-device-scale-factor=0.83 >>~/.config/chromium-flags.conf
+  fi
 fi
 
 # Style > Unlock picks the look of the disk-encryption unlock screen. The phone
