@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
@@ -192,6 +193,15 @@ Item {
       agent: agentId,
       command: hasAgent ? LauncherModel.promptArgv("<prompt>") : LauncherModel.PICK_AGENT_ARGV
     })
+  }
+
+  // Anything that opens a window (an app, the screensaver) closes the drawer,
+  // as on Android: left open, it stays on top and keeps the keyboard focus.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (root.opened && event && event.name === "openwindow") root.dismiss()
+    }
   }
 
   // ---------------------------------------------------------------- geometry

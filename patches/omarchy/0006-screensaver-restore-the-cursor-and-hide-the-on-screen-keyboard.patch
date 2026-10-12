@@ -45,7 +45,7 @@ index 78cf757..1552b48 100755
  # with it. Hand focus back to the monitor that had it once they are all gone.
  # The class goes through the environment, since in argv the screensaver's pgrep and pkill would match it.
 diff --git i/bin/omarchy-screensaver w/bin/omarchy-screensaver
-index acd3868..1d9e819 100755
+index acd3868..bd9dd9d 100755
 --- i/bin/omarchy-screensaver
 +++ w/bin/omarchy-screensaver
 @@ -6,8 +6,34 @@ screensaver_in_focus() {
@@ -94,7 +94,7 @@ index acd3868..1d9e819 100755
  
  hyprctl eval 'hl.config({ cursor = { invisible = true } })' &>/dev/null || hyprctl keyword cursor:invisible true &>/dev/null
  
-@@ -41,7 +70,18 @@ while true; do
+@@ -41,7 +70,26 @@ while true; do
      --random-effect --no-eol --no-restore-cursor &
  
    while pgrep -t "${tty#/dev/}" -x ttfx >/dev/null; do
@@ -107,6 +107,14 @@ index acd3868..1d9e819 100755
 +        # The lock stops this screensaver itself, before exit_screensaver.
 +        restore_cursor
 +        restore_osk
++        # Bring the lock up first and let this screensaver stand in front of it
++        # until it's there (it takes a moment to settle); omarchy-system-lock
++        # then stops the screensaver. Otherwise the desktop shows in between.
++        omarchy-shell lock lock >/dev/null 2>&1
++        for _ in $(seq 30); do
++          omarchy-shell lock status 2>/dev/null | grep -q '"secure":true' && break
++          sleep 0.1
++        done
 +        omarchy-system-lock
 +      fi
 +      exit_screensaver

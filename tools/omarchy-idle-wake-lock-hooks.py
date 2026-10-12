@@ -31,7 +31,9 @@ new = """  // Devices that lock on wake (the lock-after-screensaver toggle, e.g.
       } else if (settled) {
         settled = false
         root.logEvent("screensaver-wake", "user returned")
-        root.runProcess(lockProcess, "lock-on-wake", "omarchy-toggle-enabled lock-after-screensaver && omarchy-system-lock")
+        // Lock first and stop the screensaver only once the lock is up, so
+        // the desktop doesn't show in between.
+        root.runProcess(lockProcess, "lock-on-wake", "omarchy-toggle-enabled lock-after-screensaver || exit 0; omarchy-shell lock lock >/dev/null; for _ in $(seq 30); do omarchy-shell lock status | grep -q '\\\"secure\\\":true' && break; sleep 0.1; done; omarchy-system-lock")
       }
     }
   }
