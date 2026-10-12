@@ -4,9 +4,9 @@
 #   power + volume down together  -> screenshot (Omarchy's, full screen)
 #   power on its own              -> Omarchy's system menu
 # Hyprland can't bind a chord of two plain keys, so each key reports here and
-# the chord is worked out from when the keys went down. Both actions run when
-# power is released: the screenshot freezes the screen and takes the keyboard,
-# and a release it swallowed would leave the chord stuck.
+# the chord is worked out from when the keys went down. The menu opens when
+# power is released (so a chord never opens it); Hyprland cancels that release
+# bind once another key goes down, so the screenshot can't wait for it.
 set -u
 
 state="${XDG_RUNTIME_DIR:-/tmp}/omandroid-keys"
@@ -23,6 +23,12 @@ recent() {
 
 chord() {
   touch "$state/chord"
+  # Power's release bind won't fire after the second key, so forget it now:
+  # a later volume press on its own must not count as a chord.
+  rm -f "$state/power"
+  # A moment for the fingers to leave the keys, then Omarchy's screenshot:
+  # saved, copied, and a notification with a thumbnail to edit.
+  (sleep 0.4; omarchy-capture-screenshot fullscreen) >/dev/null 2>&1 &
 }
 
 case "${1:-}" in
@@ -39,8 +45,6 @@ case "${1:-}" in
   power-up)
     if [[ -f $state/chord ]]; then
       rm -f "$state/chord"
-      # Saves, copies, and shows a notification with a thumbnail to edit.
-      omarchy-capture-screenshot fullscreen &
     else
       omarchy-menu toggle system
     fi
