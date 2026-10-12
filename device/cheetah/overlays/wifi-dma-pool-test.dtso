@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+/*
+ * Bring-up only (gate W4 preparation): give the Wi-Fi chip its restricted DMA
+ * pool, so all of brcmfmac's DMA bounces through one 16 MiB region. This alone
+ * protects nothing; it is the region the HSI2 S2MPU will later confine the
+ * chip to. Apply on top of wifi-pcie-test.dtso.
+ */
+/dts-v1/;
+/plugin/;
+
+&{/reserved-memory/wifi-dma-pool} {
+	status = "okay";
+};

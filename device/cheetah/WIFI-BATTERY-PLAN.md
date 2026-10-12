@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Wi-Fi, Bluetooth and battery plan (cheetah / gs201)
 
-Status: W0/B0 (offline prep) done, see "G0 status" at the end. Nothing was run
-on the phone. Written 2026-10-11 against `omandroid` @ `0e73f9013`
+Status: W0/B0 (offline prep) done, see "G0 status". B1 done on the phone.
+**PCIe drivers for Wi-Fi (W0b) built offline, see section 7**; W1 is next and
+has a runbook there. Written 2026-10-11 against `omandroid` @ `0e73f9013`
 (Linux 7.3-rc6), kernel branch `omandroid-wifi` in `wt-wifi`.
 
 Goal: Wi-Fi through mainline brcmfmac, Bluetooth through hci_bcm, and battery
@@ -222,77 +223,14 @@ Risks, to be settled at W2:
   the real revision from brcmfmac's "chip BCM4389/N" line at W2 and narrow the
   mask.
 
-### 1.7 DT sketch (W1, not applied)
+### 1.7 DT (built, see section 7)
 
-```dts
-/* gs201.dtsi */
-pinctrl_hsi2: pinctrl@14440000 {         /* alias pinctrl7 */
-	compatible = "google,gs201-pinctrl";
-	reg = <0x14440000 0x1000>;
-	clocks = <&cmu_hsi2 CLK_GOUT_HSI2_GPIO_HSI2_PCLK>;
-	clock-names = "pclk";
-	interrupts = <GIC_SPI 421 IRQ_TYPE_LEVEL_HIGH>;
-	gph2: gph2-gpio-bank { gpio-controller; #gpio-cells = <2>;
-		interrupt-controller; #interrupt-cells = <2>; };
-	gph4: gph4-gpio-bank { ... };
-};
-
-pcie_1_phy: phy@14550000 {
-	compatible = "google,gs201-pcie-phy";
-	reg = <0x14550000 0x2000>, <0x14540000 0x1000>;   /* pma, pcs */
-	samsung,pmu-syscon = <&pmu_system_controller>;     /* 0x3ec4 */
-	#phy-cells = <0>;
-};
-
-pcie_1: pcie@14800000 {
-	compatible = "google,gs201-pcie";
-	reg = <0x14800000 0x300000>, <0x14b00000 0x1000>,  /* dbi, atu */
-	      <0x14520000 0x2000>, <0x14560000 0xd000>,    /* elbi, udbg */
-	      <0x60ffe000 0x2000>;                         /* config */
-	reg-names = "dbi", "atu", "elbi", "udbg", "config";
-	ranges = <0x82000000 0x0 0x60000000 0x60000000 0x0 0xff0000>;
-	interrupts = <GIC_SPI 428 IRQ_TYPE_LEVEL_HIGH>;
-	#interrupt-cells = <1>;
-	interrupt-map-mask = <0 0 0 0>;
-	interrupt-map = <0 0 0 0 &gic GIC_SPI 428 IRQ_TYPE_LEVEL_HIGH>;
-	clocks = <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_004_G4X1_DBI_ACLK>, ...;
-	phys = <&pcie_1_phy>;
-	samsung,sysreg = <&sysreg_hsi2 0x730>;
-	num-lanes = <1>; max-link-speed = <2>;
-	device_type = "pci"; bus-range = <0x00 0xff>;
-	#address-cells = <3>; #size-cells = <2>;
-	dma-coherent;
-	status = "disabled";
-};
-
-/* gs201-cheetah.dts */
-wlan_en: regulator-wlan-en {
-	compatible = "regulator-fixed";
-	regulator-name = "wlan-en";
-	gpio = <&gph2 4 GPIO_ACTIVE_HIGH>;
-	enable-active-high;
-	startup-delay-us = <200000>;    /* WIFI_TURNON_DELAY, W/dhd.h:3138 */
-};
-
-&pcie_1 {
-	pinctrl-0 = <&pcie1_clkreq &pcie1_perst &wlan_host_wake &wlan_dev_wake>;
-	pinctrl-names = "default";
-	reset-gpios = <&gph2 0 GPIO_ACTIVE_LOW>;
-	vpcie3v3-supply = <&wlan_en>;
-	status = "okay";
-
-	pcie@0,0 {
-		device_type = "pci"; reg = <0x0 0x0 0x0 0x0 0x0>;
-		#address-cells = <3>; #size-cells = <2>; ranges;
-		wifi@0,0 {
-			compatible = "pci14e4,4441";
-			reg = <0x10000 0x0 0x0 0x0 0x0>;
-			brcm,board-type = "google,gs201-cheetah";
-			memory-region = <&wifi_dma_pool>;   /* W4, restricted-dma-pool */
-		};
-	};
-};
-```
+The sketch that was here is now real: `gs201.dtsi` has `pinctrl_hsi2`,
+`pcie_1` and `pcie_1_phy`, and `gs201-cheetah.dts` wires WL_REG_ON, the
+host-wake and dev-wake pins and the `wifi@0,0` node (section 7.2). Two
+corrections to the sketch: the controller clocks are the x2 controller's
+(`PCIE_003`), not `PCIE_004` (7.3), and WL_REG_ON hangs off a root port
+node, where the PCI pwrctrl core finds it.
 
 ---
 ## 2. Firmware: where it is and how we get it
@@ -530,25 +468,20 @@ online and the charger switches to charge mode.
 
 ### Gate W1: PCIe controller (medium-high risk)
 
-Needs the PHY and controller drivers (1.4). First boot with `pcie_1`
-disabled and read, with devmem, only **HSI2** registers:
-
-- `0x145e0000` (S2MPU_HSI2 CTRL0; expect 0 = off);
-- ELBI `0x14520000 + 0x2c8` (LTSSM state; expect not L0).
-
-Never touch PMU 0x3ec4 from userspace (see the PMU warnings in NOTES.md and
-GPU-PLAN.md). Then enable the node and load the driver. **Pass:** the link
-reaches L0, and `lspci` shows `0001:01:00.0 [14e4:4441]` (or with our domain
-numbering).
+Runbook with rollbacks: section 7.5. **Pass:** "PCIe Gen.2 x1 link up" and
+`lspci -nn` shows `01:00.0 Network controller [0280]: Broadcom ... [14e4:4441]`.
+(0x4441 is the PCI device ID; 0x4389 is the chip ID that brcmfmac prints at
+W2.) Never touch PMU 0x3ec4 from userspace (see the PMU warnings in
+NOTES.md and GPU-PLAN.md); the PHY driver does it through the PMU regmap.
 
 ### Gate W2: brcmfmac (medium risk)
 
-Install firmware (2.2), then `modprobe brcmfmac`. **Expected:**
-"brcmfmac: brcmf_fw_alloc_request: using brcm/brcmfmac4389c1-pcie for chip
-BCM4389/N", then the firmware version line with 20.101.90 and the CLM
-version. Note the chip rev N and the shared-ring version. **Failures:**
-"Unsupported PCIE version" (see 1.6), FW-up timeout (seed/NVRAM placement),
-or a missing CLM file (check the names).
+Runbook: section 7.6. **Expected:** "brcmfmac: brcmf_fw_alloc_request: using
+brcm/brcmfmac4389c1-pcie for chip BCM4389/N", then the firmware version line
+with 20.101.90 and the CLM version, `wlan0` in `iw dev`, and a scan that
+lists networks. Note the chip rev N. **Failures:** "Unsupported PCIE
+version" (see 1.6), FW-up timeout (seed/NVRAM placement), or a missing CLM
+file (check the names).
 
 ### Gate W3: Wi-Fi works (low risk)
 
@@ -558,8 +491,11 @@ NetworkManager scan and connect, then `iperf3`. Watch for
 
 ### Gate W4: DMA protection before default-on (required)
 
-Program `s2mpu_hsi2` for the Wi-Fi VID to a restricted DMA pool (1.5).
-Until then, Wi-Fi stays opt-in and the plan says so.
+Program `s2mpu_hsi2` for the Wi-Fi VID to a restricted DMA pool (1.5). The
+pool is already in the DT, disabled (`wifi_dma_pool`, 16 MiB); 7.7 shows how
+to test brcmfmac through it before the S2MPU work. **Until W4 is done, Wi-Fi
+must not ship enabled:** `pcie_1` stays `disabled` in the default DTB, and
+`pcie_gs201` and `brcmfmac` stay blacklisted in `omandroid-device-cheetah`.
 
 ### Gates BT1-BT3
 
@@ -687,3 +623,283 @@ runbook.
 - **Fuel gauge STATUS = 0x0082: the POR bit is set**, and DesignCap reads 3000 (the chip default; Google's model has 0x09c5). The gauge has lost Google's model and runs its own default EZ model. Read-only register dump: RepSOC 98 %, VCell 4.327 V, current about 0, Temp exactly 22.0 °C (probably a default; no thermistor configuration).
 - Because our DT has no `monitored-battery`, `max17042_init_worker` writes nothing on POR (`max17042_battery.c:1187`: `enable_por_init` is only set by `max17042_apply_battery_properties`). So the driver was loaded: `max170xx_battery` reports capacity 97 %, 4.32 V, -7.8 mA, charge_full 2898 mAh of design 3000. Its interrupt (gpa9-3) stayed at 0, no storm. The fuel gauge now autoloads (removed from the blacklist); UPower and the status bar show the battery.
 - Follow-ups: load Google's M5 model (`gs201-cheetah-battery-data.dtsi`) so capacity (4926 mAh) and temperature are right; check what Android's driver does when it next sees the gauge (it may reload its model on its own POR check); charger (B3) waits for Type-C (B4).
+
+---
+
+## 7. PCIe for Wi-Fi: W0b status (2026-10-11, offline; nothing was run on the phone)
+
+Kernel branch `omandroid-pcie` in `/home/raven/android/mainline/wt-pcie`
+(on top of the BCM4389 and MAX77759 commits), built into
+`~/android/mainline/out-pcie`. Path abbreviations as at the top, plus
+`P/` = `wt-pcie` and `GD/` = `GS/drivers/pci/controller/dwc`.
+
+### 7.1 What was built
+
+| Commit | What |
+|---|---|
+| `2c53edc02` dt-bindings: phy: add Google gs201 PCIe PHY | `google,gs201-pcie-phy.yaml` |
+| `3edb1537c` phy: samsung: add Google gs201 PCIe PHY driver | `P/drivers/phy/samsung/phy-gs201-pcie.c`, `CONFIG_PHY_GS201_PCIE` (m) |
+| `c7d7cecdb` dt-bindings: PCI: add Google gs201 PCIe host controller | `google,gs201-pcie.yaml` |
+| `1176623e1` PCI: dwc: add Google gs201 PCIe host controller driver | `P/drivers/pci/controller/dwc/pcie-gs201.c`, `CONFIG_PCIE_GS201` (m) |
+| `e0bc2d709` dt-bindings: net: wireless: brcm,bcm4329-fmac: allow a restricted DMA pool | `memory-region` on the Wi-Fi node |
+| `ed54e5553` arm64: dts: exynos: google: gs201: add HSI2 pinctrl and PCIe GEN4A_1 | `pinctrl_hsi2` (enabled), `pcie_1` + `pcie_1_phy` (**disabled**) |
+| `edd3a2137` arm64: dts: exynos: google: gs201-cheetah: wire up the BCM4389 Wi-Fi | WL_REG_ON regulator, root port + `wifi@0,0`, pins, `wifi_dma_pool` (**disabled**) |
+
+omandroid repo: `kernel/configs/omandroid.config` (`PCIE_GS201=m`,
+`PHY_GS201_PCIE=m`, `PCI_PWRCTRL_GENERIC=m`, `DMA_RESTRICTED_POOL=y`),
+`device/cheetah/overlays/wifi-pcie-test.dtso` and `wifi-dma-pool-test.dtso`
+(the explicit enable steps), and `packages/omandroid-device-cheetah/vendor/modprobe.d/omandroid-wifi.conf`
+(blacklists `pcie_gs201` and `brcmfmac`).
+
+Checks: `bin/omandroid kernel`, `modules` and `images` exit 0
+(`logs/kernel-pcie.log`, `modules-pcie.log`, `images-pcie.log`). Both new
+drivers build with `W=1` and no warnings, as does the DTB (the only dtc
+warning is the existing `/chosen/framebuffer`). `dt_binding_check` and
+yamllint pass for the three bindings. `dt-validate` (dtschema 2026.9) of the
+default DTB **and** of the DTB with both test overlays applied (`pcie_1`,
+the PHY and the pool all enabled) reports only the existing `soc_id`.
+
+### 7.2 Hardware description (and what changed from the 1.7 sketch)
+
+- **`pinctrl_hsi2`** `pinctrl@14440000`, alias `pinctrl7` (the 8th entry of
+  `gs201_pin_ctrl[]`, `P/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c`),
+  GIC SPI 421, banks `gph2`/`gph4`. Enabled by default: it only registers two
+  gpiochips. The UFS pins are on the separate HSI2UFS controller and are not
+  touched.
+- **`pcie_1`** `pcie@14520000`: ELBI `0x14520000/0x1400`, DBI
+  `0x14800000/0x301000` (the DWC core finds the unrolled iATU at +0x300000 by
+  itself), config `0x60ffe000/0x2000`, I/A `0x14500000/0x1000`; MEM window
+  `0x60000000/0xff0000`; SPI 428; `num-lanes = 1`, `max-link-speed = 2`;
+  `dma-coherent` with `samsung,sysreg = <&sysreg_hsi2 0x730>`. INTx goes
+  through a `legacy-interrupt-controller` child. `soc@0` now maps up to
+  `0x80000000` so the window is reachable.
+- **`pcie_1_phy`** `phy@14550000`: PMA `0x14550000/0x2000`, PCS
+  `0x14540000/0x1000`, `rst` = ELBI `+0x1400/0x10` (the three PHY reset
+  registers; the controller's ELBI mapping stops at 0x1400 so the two don't
+  overlap), UDBG `0x14560000/0xd000`, `samsung,pmu-syscon =
+  <&pmu_system_controller 0x3ec4>`.
+- **cheetah**: `wlan_pwr` = `regulator-fixed` on `gph2-4` (WL_REG_ON),
+  `startup-delay-us = 200000`; root port `pcie@0,0` (`pciclass,0604`) with
+  `vpcie3v3-supply = <&wlan_pwr>`; `wifi@0,0` = `pci14e4,4441`,
+  `brcm,board-type = "google,gs201-cheetah"`, host-wake `gpa6-1` level-high
+  (`interrupts-extended`), `memory-region = <&wifi_dma_pool>`; pinctrl for
+  CLKREQ#, PERST#, dev-wake (`gph2-5`, input pull-down) and host-wake
+  (EINT, pull-down) as in `G/devices/google/gs201/dts/gs201-cloudripper-wlan.dtsi:13-55`.
+- **`wifi_dma_pool`**: `restricted-dma-pool`, 16 MiB, 2 MiB aligned, dynamic
+  placement, `status = "disabled"`. Disabled reserved-memory nodes are not
+  reserved at all, and `of_dma_set_restricted_buffer()` skips an unavailable
+  pool (`P/drivers/of/device.c:51-58`), so it costs nothing until enabled.
+
+### 7.3 Design choices, with evidence
+
+- **PHY sequence = Google's CAL, verbatim.** Order in `phy_power_on()`:
+  power-down clear (`GD/pcie-exynos-gs201-rc-cal.c:62-88`), then the
+  config (`:99-339`): input clock 0xd8, PCS mux glitch fix, the reset pulse
+  on ELBI 0x1400/0x1404/0x1408 with 0x1404 released first (`:123-133`),
+  common PMA, 38.4 MHz block, per-lane table (`:176-276`), both-lane clock
+  block (`:279-288`), PCS RC/L2 settings (`:293-325`), CMN/PORT release
+  (`:328-329`), XO select at 0x5d0 (`:333-336`). Then Google's link-up
+  extras: PMU 0x3ec4 bit 10, UDBG 0xc800 = 0x421, PMA 0x32c = 0
+  (`GD/pcie-exynos-rc.c:3567-3578`). `phy_power_off()` is the all-power-down
+  (`cal.c:36-59`). Tables are in `P/drivers/phy/samsung/phy-gs201-pcie.c:75-160`.
+  Note Google's per-lane loop adds `i * 0x800` cumulatively (`cal.c:177`);
+  that is only equal to a lane stride for one or two lanes, which is all
+  this PHY has.
+- **PHY isolation:** `phy_init()` sets PMU 0x3ec4 bit 0 (bypass), as
+  `exynos_pcie_phy_isolation(PCIE_PHY_BYPASS)` does (`GD/pcie-exynos-rc.c:393-407`;
+  values `GD/pcie-exynos-common.h:52-53`). It goes through the exynos-pmu
+  regmap, which uses the secure SMC path; 0x3ec4 (`GS101_PHY_CTRL_PCIE_GEN4_1`)
+  is in its writable table (`P/drivers/soc/samsung/gs101-pmu.c`, range ending
+  at `GS101_PHY_CTRL_UFS`). Stock never isolates ch1 at runtime
+  (`use-phy-isol-en` unset, `GD/pcie-exynos-rc.c:2263-2278`); we isolate
+  only in `phy_exit()`.
+- **Controller link-up = `exynos_pcie_rc_establish_link()`
+  (`GD/pcie-exynos-rc.c:3551-3800`)**, split over the DWC host hooks in
+  `P/drivers/pci/controller/dwc/pcie-gs201.c`:
+  `host_init` (`:427`): PERST# low, pwrctrl power-on (WL_REG_ON + 200 ms),
+  PHY init/power-on, I/A, DBI setup (`:242`: vendor/device 144d:eced,
+  GEN3_RELATED_OFF = 0x12000 "EQ off" `rc.c:3581`, aux clock 26 MHz
+  `rc.c:3191`, L1 exit latency and completion timeout as `rc.c:3160-3230`),
+  ELBI setup (`:217`: 0x3bc exit-L1/NAK, 0x3a0 manual link-down reset,
+  0x74 xfer pending, 0x3a8 Q-channel no gating for IP >= 0x889500, 0x474
+  NAK, 0x1078 DBI L1 exit disable, history buffer; `rc.c:3594-3660`), IOCC
+  (`:201`: DBI 0x8e8 = 0x10101010 and sysreg 0x730 = 3, `rc.c:1974-2028`,
+  `rc.h:240-245`), PERST# high and 20 ms (`perst_delay_us` default,
+  `rc.c:2083-2085`). `start_link` (`:356`): ELBI 0x54 = 1, poll
+  0x2c8 & 0x3f for L0 for 48 ms (`MAX_TIMEOUT` 4800 x 10 us,
+  `common.h:20`), up to 3 tries with PERST# low and a PHY redo in between
+  (stock does 10, `rc.c:3686-3720`), then clear xfer-pending and enable the
+  link-down and completion-timeout interrupts (`rc.c:3780-3798`).
+  `link_up` uses stock's window RCVRY_LOCK..L1_IDLE (`rc.c:1775-1788`).
+- **I/A sequencer kept, default on**, because the stock cheetah DT turns
+  it on (`use-ia = "true"`, `R/live.dts:12134`; "PCIe I/A is ENABLED",
+  `R/dmesg.txt:2076`) and Google runs it on every link-up right after the
+  PHY config (`rc.c:3071-3086`). The microcode is `rc.c:2945-3068`, in
+  `pcie-gs201.c:151`. It needs the ELBI, PMA and I/A physical addresses; the
+  PMA one is read from the PHY node. `modprobe pcie_gs201 use_ia=0` skips it
+  (an on-phone experiment, 7.5).
+- **INTx only, as on stock** (`use-msi = "false"`, `R/live.dts:12131`). On
+  stock the GIC line is shared between `exynos-pcie` and `dhdpcie`
+  (`R/interrupts.txt:243`) and only the controller acks the ELBI status
+  (`rc.c:3290-3305`). Here a chained handler (`pcie-gs201.c:554`) acks
+  IRQ0-2 (write-one-to-clear) and dispatches IRQ0 bits 14/16/18/20
+  (`rc.h:19-23`) to a 4-line INTx domain; the child chip masks through
+  IRQ0_EN (`rc.h:31-35`). A no-op `msi_init` (`:501`) keeps the DWC core
+  from chaining its iMSI-RX handler onto the same line; brcmfmac's
+  `pci_enable_msi()` fails and it uses INTx.
+- **WL_REG_ON through PCI pwrctrl.** 7.3 has `pci_pwrctrl_create_devices()`
+  / `power_on_devices()` for DWC glue drivers (used by `pcie-qcom.c`); the
+  generic driver binds `pciclass,0604` nodes with a `*-supply`. That gives
+  the right order (power, then PERST#) and powers the chip off on unbind.
+  The 200 ms is `WIFI_TURNON_DELAY` (`W/dhd.h:3138`; stock: REG_ON at 3.571 s,
+  L0 at 3.809 s, `R/dmesg.txt:5171,5424`).
+- **Clocks: the x2 controller (`PCIE_003`), not `PCIE_004`.** pcie_1 is
+  GEN4A_1 (I/A `PCIE_IA_GEN4A_1` at 0x14500000, `QE_PCIE_GEN4A`,
+  `UASC_PCIE_GEN4A_DBI_1`), and Google's base DT gives it `num-lanes = <2>`
+  (`G/devices/google/gs201/dts/gs201-pcie.dtsi`), so it is the x2
+  controller; cheetah only wires one lane. Stock manages no clocks at all
+  (`pcie-clk-num = <0>`), and CMU_HSI2 runs automatic gating
+  (`auto_clock_gate`), so enabling these gates is belt and braces. We boot
+  with `clk_ignore_unused`, so a wrong pick cannot break W1; it matters only
+  once that goes (7.8).
+- **Not ported, on purpose:** L1 substates (`rc.c:4264-4590`), the
+  suspend/L2 path (`rc.c:3979-4118`), the "ch2" PHY power-down of the unused
+  third PHY at 0x131b0000 (`rc.c:3088-3131`, PMU 0x3ecc is outside the PMU
+  regmap's writable table), the SysMMU/S2MPU DMA ops (`rc.c:232-360`), and
+  `exynos_soc_write(0x15, 0x4000)` (`rc.c:3874`). The last writes a "soc"
+  region that the stock DT does not have, so in the source we have it
+  cannot run as written; it is an experiment if detection fails (7.5).
+
+### 7.4 Security (unchanged rule, now enforced in three places)
+
+Until gate W4, the BCM4389 can DMA to all of RAM (1.5). Therefore:
+`pcie_1`, `pcie_1_phy` and `wifi_dma_pool` are `disabled` in the default
+DTB; `pcie_gs201` and `brcmfmac` are blacklisted in
+`omandroid-device-cheetah`; enabling is the explicit overlay step below.
+**Wi-Fi must not ship enabled until W4** (a restricted-dma-pool that the
+HSI2 S2MPU confines the chip to, or S2MPU programming by other means). Run
+W1-W3 on a network you trust. Never commit the firmware (2.3) or the MAC
+from `/chosen/config`.
+
+### 7.5 W1 runbook: link up (on the phone; each step has its rollback)
+
+From the omandroid repo, phone in Arch over USB, a second terminal running
+`tools/phone-ssh dmesg -w`. `devmem` is `tools/devmem.c` (in the initramfs
+at `/usr/local/bin/devmem`; copy it to the root if needed).
+
+```sh
+export KERNEL_DIR=$HOME/android/mainline/wt-pcie KERNEL_OUT=$HOME/android/mainline/out-pcie
+O=$KERNEL_OUT D=$O/arch/arm64/boot/dts/exynos/google/gs201-cheetah.dtb
+
+# W1.0  the blacklist must be on the phone BEFORE any DTB with pcie_1 on
+tools/phone-ssh 'grep -H . /usr/lib/modprobe.d/omandroid-wifi.conf'   # pcie_gs201, brcmfmac
+#       if missing: reinstall omandroid-device-cheetah (or stream the file to /etc/modprobe.d/)
+
+# W1.1  new kernel, default DTB (pcie_1 off). Only change: HSI2 pinctrl + an idle regulator
+bin/omandroid modules-push && bin/omandroid push          # slot B, reboots
+tools/phone-ssh 'uname -r; grep -E "gph2|gph4" /sys/kernel/debug/gpio | head -3;
+  grep wlan /sys/kernel/debug/regulator/regulator_summary; lsmod | grep -c gs201'
+#       pass: USB/SSH, UFS, touch, GPU as before; gph2/gph4 chips; wlan-reg-on 0 users; 0 modules
+tools/phone-ssh 'devmem 0x145e0000'    # S2MPU_HSI2 CTRL0: expect 0 (off). UFS shares HSI2, so safe
+#       rollback: power-cycle; ABL falls back to slot A after the retries, or push the previous out dir
+
+# W1.2  explicit enable: overlay pcie_1 + PHY into the DTB, then images
+cp "$D" "$D.default"
+$O/scripts/dtc/dtc -q -I dts -O dtb -o out/wifi-pcie-test.dtbo device/cheetah/overlays/wifi-pcie-test.dtso
+$O/scripts/dtc/fdtoverlay -i "$D.default" -o "$D" out/wifi-pcie-test.dtbo
+bin/omandroid images && bin/omandroid push
+tools/phone-ssh 'ls /sys/bus/platform/devices | grep -E "14520000|14550000"; lsmod | grep gs201'
+#       pass: both devices exist; phy_gs201_pcie may be loaded (it only maps registers), pcie_gs201 not
+tools/phone-ssh 'devmem 0x145202c8'    # ELBI LTSSM: expect 0x0 (not 0x11)
+#       rollback: cp "$D.default" "$D"; bin/omandroid images && bin/omandroid push
+#       (bin/omandroid kernel also rebuilds the DTB without the overlay)
+
+# W1.3  train the link, by hand
+tools/phone-ssh 'modprobe pci-pwrctrl-generic &&
+  echo "module pcie_gs201 +p; module phy_gs201_pcie +p" > /sys/kernel/debug/dynamic_debug/control &&
+  modprobe pcie_gs201 && sleep 1 && lspci -nn'
+#       pass: "PCIe Gen.2 x1 link up" (Gen.1 is acceptable for W1, note it),
+#             0000:00:00.0 [144d:eced] bridge, 0000:01:00.0 [14e4:4441] network,
+#             BAR0 64K and BAR2 4M assigned (stock: R/dmesg.txt:5461-5470)
+tools/phone-ssh 'devmem 0x145202c8; grep -i gs201 /proc/interrupts'   # 0x11 = L0; no storm
+#       rollback: tools/phone-ssh modprobe -r pcie_gs201   (PERST# low, PHY off, WL_REG_ON low)
+#       if the phone hangs: panic=10 reboots on a panic; a bus hang needs Power held ~30 s;
+#       then boot the default DTB (W1.2 rollback)
+```
+
+**If W1.3 fails**, the driver prints "link training failed (try n), LTSSM
+0x.." and, after the last try, the controller's 32-entry LTSSM history.
+Read it this way:
+
+| Last LTSSM | Meaning | Next experiment |
+|---|---|---|
+| 0x00-0x01 Detect | no receiver: the chip is unpowered or held in reset | `grep gph2 /sys/kernel/debug/gpio`: gph2-4 (WL_REG_ON) and gph2-0 (PERST#) must be high during training; regulator_summary shows `wlan-reg-on` enabled. If both are right, suspect the S2MPG13 PCIe rails (LDO3 0.85 V, LDO18 1.8 V; always-on in stock, but we cannot read them without an S2MPG13 driver): boot stock, then warm-reboot into slot B so the rails were last set by Android, and retry |
+| 0x02-0x06 Polling/Detect-wait | receiver seen, no bit lock: PHY, refclk or CLKREQ# | `modprobe -r pcie_gs201; modprobe pcie_gs201 use_ia=0`; compare the dyndbg line "PMA 0x3f0 .. 0xfc0 .. PCS 0x188" across tries; check `gph2-1` is in function 2 (CLKREQ#) |
+| 0x07-0x10 Config/Recovery | trains but drops | try `max-link-speed = <1>` via a one-line overlay (Gen1) |
+| L0 but no 01:00.0 | config TLPs fail | `lspci -vv -s 00:00.0` bus numbers; dmesg for "completion timeout"; iATU lines from the DWC core |
+
+### 7.6 W2 runbook: brcmfmac, firmware, interface, scan
+
+The firmware comes from the user's own factory image, extracted on the
+laptop by `tools/extract-vendor-firmware` (2.2), into `out/` (gitignored).
+It is never committed or packaged.
+
+```sh
+# W2.1  firmware (laptop -> phone)
+tools/extract-vendor-firmware -o out/vendor-firmware \
+  ~/android/factory/cheetah-cp2a.260705.006/image-cheetah-cp2a.260705.006.zip
+tar -C out/vendor-firmware -cf - usr | tools/phone-ssh 'tar -C / -xf -'
+tools/phone-ssh 'ls -l /usr/lib/firmware/updates/brcm/ | grep cheetah'   # .bin .txt .clm_blob (+ BT .hcd)
+#       rollback: tools/phone-ssh 'rm /usr/lib/firmware/updates/brcm/*google,gs201-cheetah*'
+
+# W2.2  driver (the blacklist only stops autoload; an explicit modprobe works). Link from W1.3 is up.
+tools/phone-ssh 'modprobe brcmfmac && sleep 5 && dmesg | grep -i brcmf | tail -20 && iw dev'
+#       pass: "using brcm/brcmfmac4389c1-pcie for chip BCM4389/N", firmware 20.101.90,
+#             CLM "Google.C10sub6" loaded, wlan0 listed. Write down N.
+#       rollback: tools/phone-ssh 'modprobe -r brcmfmac'   (chip keeps its firmware until
+#                 'modprobe -r pcie_gs201' drops WL_REG_ON)
+
+# W2.3  scan (no association yet; the MAC is whatever the chip reports, see 1.6)
+tools/phone-ssh 'ip link set wlan0 up && iw dev wlan0 scan | grep -E "^BSS|SSID:|signal:" | head -30'
+#       pass: nearby networks with sane signal levels; no "brcmf_.*error" or firmware trap in dmesg
+#       rollback: 'ip link set wlan0 down; modprobe -r brcmfmac; modprobe -r pcie_gs201'
+```
+
+W2 failure signatures and what to change are in 1.6 (IPC version 8/9,
+FW-up timeout, CLM name). Interrupt problems show as "brcmf_pcie_..."
+timeouts with `grep gs201-pcie-intx /proc/interrupts` not counting: then
+INTx is not reaching brcmfmac (check that IRQ0 bit 14 is set in `devmem
+0x14520000` while the chip is up).
+
+### 7.7 Before W4: brcmfmac through the restricted pool (optional, safe)
+
+Apply `wifi-dma-pool-test.dtso` on top of `wifi-pcie-test.dtso` (same as
+W1.2, second `fdtoverlay` pass) and reboot. **Expect** "Reserved memory:
+created restricted DMA pool at 0x..., size 16 MiB" early in dmesg, and W2
+working unchanged. This proves brcmfmac runs with all its DMA bounced
+through one region, which is the precondition for W4. It does **not**
+protect anything yet: the S2MPU still allows everything. Rollback: the
+W1.2 DTB.
+
+### 7.8 Open risks and how each gets answered
+
+- **The PHY table is untested.** It is Google's verbatim, but our order
+  differs in two small ways: the PMU bit 10 goes before, not after, the I/A
+  programming, and the controller's DBI/ELBI setup is done once, not
+  repeated on every retry. The history dump in 7.5 tells which stage fails.
+- **PCIe rails.** S2MPG13 LDO3/LDO18 are `regulator-always-on` in stock; we
+  assume ABL leaves them on. A Detect-only failure with WL_REG_ON and PERST#
+  high points here (7.5 table).
+- **I/A on or off.** Stock runs it; if it misbehaves without L1.2 it can be
+  dropped with `use_ia=0`.
+- **Gates 003 vs 004.** Once `clk_ignore_unused` goes, check that the link
+  still trains and that `clk_summary` shows the 003 gates enabled.
+- **INTx semantics.** The ELBI INTA bit is an assert event, not a level;
+  brcmfmac masks the chip's interrupt in its hard IRQ handler and unmasks it
+  after the thread, which produces a fresh assert. Same contract as stock,
+  but watch for stalls under load at W3.
+- **No link-down recovery.** A link-down or completion-timeout is logged
+  only. Recovery is `modprobe -r brcmfmac pcie_gs201` and load again.
+- **Suspend.** No L2/PME path yet; keep suspend off (it already is).
+- **Domain number.** We have one host bridge, so the Wi-Fi chip is
+  `0000:01:00.0`, not stock's `0001:01:00.0`.

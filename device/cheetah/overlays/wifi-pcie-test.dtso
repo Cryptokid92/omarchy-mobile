@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT
+/*
+ * Bring-up only (WIFI-BATTERY-PLAN.md, gates W1-W3): turn on the gs201
+ * PCIe controller and PHY that carry the BCM4389 Wi-Fi. Applied to the built
+ * gs201-cheetah.dtb with fdtoverlay; never part of a default image until
+ * gate W4 (HSI2 S2MPU DMA restriction) is done. Paths, not labels, so the
+ * base DTB needs no __symbols__.
+ */
+/dts-v1/;
+/plugin/;
+
+&{/soc@0/pcie@14520000} {
+	status = "okay";
+};
+
+&{/soc@0/phy@14550000} {
+	status = "okay";
+};
