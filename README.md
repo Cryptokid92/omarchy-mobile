@@ -9,6 +9,8 @@ Plan: https://claude.ai/code/artifact/060038bc-beff-497e-9643-4f322318b2be
 | Path | What it is |
 | --- | --- |
 | `bin/omandroid` | Native Omarchy tooling: `capture`, `kernel`, `kernel-shell` |
+| `packages/` | pacman packages: `omandroid-shell` (the phone profile for Omarchy's shell), `omandroid-device-cheetah` (Pixel 7 Pro support), patched `mesa`. `tools/phone-install-package` builds one on the phone and installs it |
+| `patches/omarchy/` | Changes to Omarchy for touch devices, to send upstream (`bridge-*` ones are stopgaps for the phone's older Omarchy) |
 | `bin/lineage-ref` | Builds LineageOS for the phone. Used as a rooted reference Android (M0) and, later, for Waydroid images |
 | `kernel/configs/` | Our kernel config fragment, merged on top of arm64 `defconfig` |
 | `device/cheetah/` | Pixel 7 Pro bring-up notes and device trees |
@@ -20,7 +22,7 @@ Large trees live outside the repo, under `~/android/`:
 | Path | Contents |
 | --- | --- |
 | `~/android/omandroid` | LineageOS 24.0 source. Includes Google's GPL Pixel 7 kernel at `out-kernel/google/gs-6.1` |
-| `~/android/mainline/linux` | Our kernel repo: branch `omandroid` on mainline v7.3-rc6 (remote `upstream` is Linus's tree), one commit per subsystem so patches can go upstream |
+| `~/android/mainline/linux` | Our kernel repo: branch `omandroid` on mainline v7.3-rc6 (remote `upstream` is Linus's tree), one commit per subsystem so patches can go upstream. Published to [derekross/linux-omandroid](https://github.com/derekross/linux-omandroid) by `tools/publish-kernel` (a squashed upstream base, our commits unchanged on top) |
 | `~/android/mainline/pmos-tensor` | postmarketOS Tensor kernel, for reference |
 | `~/android/reference` | Captures from the phone. Contains serial numbers and partition backups: never commit |
 | `~/android/factory` | Verified stock factory images, used to restore the phone |
