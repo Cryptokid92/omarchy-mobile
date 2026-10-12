@@ -60,3 +60,10 @@ if omarchy-done ensure omandroid-osk; then
 o.launch_on_start("squeekboard")
 LUA
 fi
+
+# squeekboard needs Hyprland's input-method slot, which Omarchy's fcitx5 (run
+# for desktop compose sequences) would otherwise take. Masked for this user
+# only, once; unmask to bring it back.
+if omarchy-done ensure omandroid-osk-input-method; then
+  systemctl --user mask --now omarchy-fcitx5.service
+fi
