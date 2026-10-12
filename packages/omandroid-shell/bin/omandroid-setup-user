@@ -75,3 +75,10 @@ if omarchy-done ensure omandroid-phone-rules; then
 dofile("$share/hypr/phone.lua")
 LUA
 fi
+
+# Chromium's first-run dialogs are desktop-sized: their buttons land off a
+# phone screen (the "Additional Terms" page blocked a login). Skip them, once.
+if omarchy-done ensure omandroid-chromium-no-first-run; then
+  grep -qx -- --no-first-run ~/.config/chromium-flags.conf 2>/dev/null ||
+    echo --no-first-run >>~/.config/chromium-flags.conf
+fi
