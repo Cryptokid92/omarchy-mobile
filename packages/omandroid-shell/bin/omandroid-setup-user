@@ -65,3 +65,13 @@ if omarchy-done ensure omandroid-suspend-off; then
   mkdir -p ~/.local/state/omarchy/toggles
   touch ~/.local/state/omarchy/toggles/suspend-off
 fi
+
+# Phone window rules (apps fill the screen instead of floating at desktop
+# sizes), loaded after Omarchy's defaults from the user's override file, once.
+if omarchy-done ensure omandroid-phone-rules; then
+  cat >>~/.config/hypr/looknfeel.lua <<LUA
+
+-- Omandroid: phone window rules
+dofile("$share/hypr/phone.lua")
+LUA
+fi
