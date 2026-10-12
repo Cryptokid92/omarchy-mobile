@@ -40,15 +40,6 @@ hl.config({ cursor = { invisible = true, hide_on_touch = true } })
 LUA
 fi
 
-# Power button opens Omarchy's system menu, as Super + Escape does
-if omarchy-done ensure omandroid-power-key; then
-  cat >>~/.config/hypr/bindings.lua <<'LUA'
-
--- Omandroid: the power button opens the system menu (like Super + Escape)
-hl.bind("XF86PowerOff", hl.dsp.exec_cmd("omarchy-menu toggle system"), { description = "System menu" })
-LUA
-fi
-
 # On-screen keyboard: squeekboard shows itself when a text field takes focus
 # (Hyprland relays text-input-v3 to its input-method-v2). Started from
 # Omarchy's user autostart file, once.
