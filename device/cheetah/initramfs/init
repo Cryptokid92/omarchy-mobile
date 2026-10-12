@@ -16,7 +16,12 @@ mount -t tmpfs tmpfs /run
 # Arch starts, so keep status lines off the screen (they still go to kmsg).
 # Storage-guard warnings always show.
 SCREEN=/dev/tty0
-grep -qw splash /proc/cmdline && SCREEN=/dev/null
+if grep -qw splash /proc/cmdline; then
+  SCREEN=/dev/null
+  # Replace the bootloader's logo with Omarchy's at once; Plymouth draws the
+  # same screen when Arch starts, so the two join up.
+  [ -f /splash.bgra.gz ] && zcat /splash.bgra.gz > /dev/fb0 2>/dev/null
+fi
 
 # --- UFS safety: every SCSI disk is read-only, before anything else runs ---
 # The UFS device holds irreplaceable per-device calibration (efs, persist,
