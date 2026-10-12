@@ -83,15 +83,15 @@ short_press() {
       omarchy-brightness-display off
     fi
   else
+    # Screen off first, as on Android: the lock comes up behind the dark panel.
+    omarchy-brightness-display off
     omarchy-system-lock
-    # Turn the screen off once the lock is up: the lock wakes the display as
-    # it appears, which would undo an earlier "off".
+    # Once the lock is up, make sure nothing woke the display meanwhile.
     for _ in $(seq 30); do
       omarchy-shell lock status 2>/dev/null | grep -q '"secure":true' && break
       sleep 0.1
     done
-    sleep 0.3
-    omarchy-brightness-display off
+    screen_off || omarchy-brightness-display off
   fi
 }
 
