@@ -362,6 +362,13 @@ def real_package(t):
     ok("!card.held" in service and "closeButtonShown: service.touchScreen" in service
        and '["hyprctl", "-j", "devices"]' in service and "touchScreenProc.running = true" in service,
        "real omarchy: the close button shows when Hyprland lists a touch screen (0017)")
+    forget = service.split("function forgetNotification(name) {", 1)
+    ok(len(forget) == 2 and "function forget(name: string): string {\n      return service.forgetNotification(name)" in service
+       and "/^[0-9]+-[0-9]+\\.json$/.test(file)" in forget[1].split("\n  }\n", 1)[0]
+       and 'removePopup(i, "forget")' in forget[1].split("\n  }\n", 1)[0]
+       and "enqueuePopupFileJob(" in forget[1].split("\n  }\n", 1)[0]
+       and 'if (reason === "forget") deletePopupFileFor(entry)\n      else archivePopupFileFor(entry)' in service,
+       "real omarchy: forget takes one notification away, toast or history, on the file queue (0019)")
     menu = read(root, "usr/share/omarchy/shell/plugins/menu/Menu.qml")
     back = menu.split("DragHandler {\n        id: backSwipe", 1)
     ok(len(back) == 2 and "yAxis.enabled: false" in back[1].split("}", 1)[0]
