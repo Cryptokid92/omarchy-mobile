@@ -70,6 +70,7 @@ Priorities: **P1** broken, unsafe, or a dead end on a phone; **P2** noticeably a
 4. Refresh scripts keep platform additions (0.3).
 5. Web apps: per-site browser flags (3.1).
 6. Later: a gum shim that uses the shell's dmenu mode on touch (1.11).
+7. Notifications: platform phrasing. On a touch platform `omarchy-notification-send` says "Tap to" for "Click to", "Tap to edit/open" for the screenshot and recording toasts' "Super + Alt + , (or click this)", points Voxtype's "Hold F9" at the Dictation tile (1.12), and drops parenthesised or whole-line "Super + …" hints; a desktop sends what it did before. Patch 0020, omamobile-omarchy 0.1.12 (offline as above).
 
 ## Suggested order
 
