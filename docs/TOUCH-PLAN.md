@@ -64,7 +64,7 @@ Priorities: **P1** broken, unsafe, or a dead end on a phone; **P2** noticeably a
 
 ## Omarchy patches this needs (upstreamable)
 
-1. Notifications: swipe to dismiss and a touch close button (1.1). Patch 0017, omamobile-omarchy 0.1.10 (built and tested offline, not yet checked on the phone); the shade with history is still open.
+1. Notifications: swipe to dismiss and a touch close button (1.1). Patch 0017, omamobile-omarchy 0.1.10 (built and tested offline, not yet checked on the phone). The shade under quick settings lists the toasts and history, and a sideways swipe on a row forgets that one notification through the service (patch 0019, omamobile-omarchy 0.1.11, omamobile-shell 0.2.28; offline as above).
 2. Menu: back chevron and swipe back (1.3). Patch 0018, omamobile-omarchy 0.1.10 (offline as above); the Settings entry is still open.
 3. Menu: a platform extension directory (`$XDG_DATA_DIRS/omarchy/menu.d`) so packages hide rows without editing user files (0.2, 0.3, 3.3).
 4. Refresh scripts keep platform additions (0.3).
