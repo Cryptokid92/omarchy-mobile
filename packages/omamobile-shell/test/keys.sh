@@ -102,6 +102,28 @@ echo false >"$t/locked"
 press; grep -q "omarchy-system-lock" "$log" || fail "an unanswered screen state reads as lit: the press locks"
 echo "ok - power key: lock, screen off, and wake by lock and screen state"
 
+# A lock slower than the long-press timer (it takes about a second on the
+# phone) must not turn the short press into a long one that wakes the lock.
+cat >"$t/bin/hyprctl" <<STUB
+#!/bin/bash
+if [[ \$1 == monitors ]]; then printf '[{"dpmsStatus": %s}]\n' "\$(cat "$t/dpms")"; exit 0; fi
+printf '{"class": "%s"}\n' "\$(cat "$t/class")"
+STUB
+mv "$t/bin/omarchy-system-lock" "$t/bin/omarchy-system-lock.fast"
+cat >"$t/bin/omarchy-system-lock" <<STUB
+#!/bin/bash
+echo "omarchy-system-lock" >>"$log"
+echo true >"$t/locked"
+sleep 1
+STUB
+chmod +x "$t/bin/omarchy-system-lock"
+echo false >"$t/locked"; echo true >"$t/dpms"
+press; sleep 0.6
+grep -q "omarchy-system-lock" "$log" || fail "slow lock: the press locks"
+grep -q "lock wake\|brightness-display on\|omarchy-menu" "$log" && fail "slow lock: the long-press timer doesn't wake the lock it just took"
+mv "$t/bin/omarchy-system-lock.fast" "$t/bin/omarchy-system-lock"
+echo "ok - power key: a slow lock stays a short press"
+
 # Sleep now (SUSPEND-PLAN 6.1): only after a press that turned the screen
 # off behind a secure lock; never after a wake or with the lock not secure.
 cat >"$t/bin/hyprctl" <<STUB

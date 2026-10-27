@@ -230,6 +230,10 @@ case "${1:-}" in
     fi
     ;;
   power-up)
+    # Released: forget the press before acting on it. Locking takes about a
+    # second, longer than the long-press timer, which then found power still
+    # "held" and woke the lock it had just taken (a flash of the PIN pad).
+    rm -f "$state/power"
     if [[ -f $state/chord ]]; then
       rm -f "$state/chord"
     elif [[ -f $state/long ]]; then
@@ -237,7 +241,6 @@ case "${1:-}" in
     else
       short_press
     fi
-    rm -f "$state/power"
     ;;
   *)
     echo "Usage: omamobile-keys power-down|power-up|volume-down|volume-up" >&2
