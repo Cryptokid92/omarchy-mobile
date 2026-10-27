@@ -1,0 +1,144 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+#
+# speaker-gain17-probe: AOC-PLAN.md C9d-7/C9d-8 (C9i session 2, steps G0-G4)
+# as one attended session, run ON THE LAPTOP with the phone on USB:
+#   tools/speaker-gain17-probe
+#
+#   G0  read-only: the report (omamobile-audio 0.6.0 or later), the TX slots,
+#       the hostless PCM and the 10 RTLOG controls; makes the test tones
+#   G1  the V/I feedback stream alone, no sound
+#   G2  stage media, 737/10: a 3 s -23 dBFS 1 kHz tone with the impedance
+#       reading, then the same with the feedback stream
+#   G3  stage c9-probe, 817/17: one 1 s -30 dBFS tone, feedback off
+#   G4  the same with the feedback stream
+# then prints the matching row of the C9d-8 outcome table (AOC-PLAN.md).
+#
+# Every sound waits for Enter after the script says what will play; "s"
+# stops. Each burst goes through tools/speaker-trip-burst (RISE=5: the
+# player is killed and both amplifiers muted on a 5 C jump), and the
+# watchdog stays on. 60 s of rest before each gain-17 burst. The phone's
+# /etc/omamobile/speaker.conf is saved first and put back at the end, also
+# on a stop, a failure or Ctrl-C, and the service restarted; the settings
+# this script changes are the stage, the levels, the feedback switch, the
+# jump rule and the watchdog interval, everything else in the file is kept.
+# Changes no limit. Lines go to logs/gain17-<time>.log (gitignored).
+set -uo pipefail
+cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.."
+SP=omamobile-speaker-protection
+CONF=/etc/omamobile/speaker.conf
+mkdir -p logs
+log=logs/gain17-$(date +%Y%m%d-%H%M%S).log
+say() { echo "== $*" | tee -a "$log"; }
+ph() { tools/phone-ssh "$@" 2>&1 | tee -a "$log"; return "${PIPESTATUS[0]}"; }
+stop() { say "STOP: $*"; exit 1; }
+ask() {
+  local a
+  read -r -p "$* -- Enter to play, s to stop: " a </dev/tty || a=s
+  [[ $a != s ]] || stop "stopped by the listener"
+}
+
+saved=0
+restore() {
+  ((saved)) || return 0
+  say "restoring $CONF and the everyday level"
+  ph "$SP feedback stop >/dev/null 2>&1; $SP mute --reason 'gain17-probe: end' >/dev/null
+      if [ -e $CONF.gain17-probe ]; then mv $CONF.gain17-probe $CONF; elif [ -e $CONF.gain17-none ]; then rm -f $CONF $CONF.gain17-none; fi
+      systemctl restart omamobile-speaker-protection; sleep 3; $SP status | head -n1"
+}
+trap restore EXIT
+trap 'exit 130' INT TERM
+
+# lvl DIGITAL ANALOG STAGE: the levels on both amplifiers, the rest of the
+# saved settings kept (feedback off: the steps turn it on themselves)
+lvl() {
+  ph "{ grep -vE '^OMAMOBILE_(SPK_(STAGE|DIGITAL|ANALOG|TOP_|BOTTOM_|FEEDBACK|TEMP_JUMP)|WATCH_INTERVAL)' $CONF.gain17-probe 2>/dev/null
+        printf 'OMAMOBILE_SPK_STAGE=$3\nOMAMOBILE_SPK_DIGITAL=$1\nOMAMOBILE_SPK_ANALOG=$2\nOMAMOBILE_SPK_TEMP_JUMP=5\nOMAMOBILE_WATCH_INTERVAL=0.5\n'; } > $CONF.new &&
+      mv $CONF.new $CONF && systemctl restart omamobile-speaker-protection; sleep 3; $SP status | head -n1" |
+    grep -c "ok: stage $3, .*Top $1/$2, Bottom $1/$2" >/dev/null
+}
+# tb FILE SECONDS IMP FB: one burst with the tripwire; sets $result and $z_top, $z_bottom
+tb() {
+  local out
+  out=$(tools/phone-ssh "F=$1 S=$2 VOL=1.0 RISE=5 IMP=$3 FB=$4 bash -s" < tools/speaker-trip-burst 2>&1)
+  printf '%s\n' "$out" | tee -a "$log"
+  result=$(tail -n1 <<<"$out")
+  z_top=$(sed -n 's/^impedance: Top *Z\/CAL_R \([0-9.]*\).*/\1/p' <<<"$out")
+  z_bottom=$(sed -n 's/^impedance: Bottom *Z\/CAL_R \([0-9.]*\).*/\1/p' <<<"$out")
+  z_top=${z_top:-none} z_bottom=${z_bottom:-none}
+  say "result: $result; Z/CAL_R top $z_top, bottom $z_bottom"
+}
+near() { [[ $1 != none ]] && awk -v z="$1" -v lo="$2" -v hi="$3" 'BEGIN { exit !(z >= lo && z <= hi) }'; }
+
+say "G0: read-only state"
+ph "$SP report" > /dev/null || stop "no report: install omamobile-audio 0.6.0 or later first"
+rep=$(grep -E '^(kernel:|package: omamobile-audio |stage:|service:|stamp:|stage c9 allowed|speaker_protection:|feedback:)' "$log")
+printf '%s\n' "$rep"
+grep -c '^service: ok: stage media,.*Top 737/10, Bottom 737/10' <<<"$rep" >/dev/null ||
+  stop "the speakers aren't at stage media 737/10: restore the default settings first (C9d-3 step 0)"
+grep -c 'TX slots ok' <<<"$rep" >/dev/null || stop "TX slots not ok: the aoc-sound-test overlay needs its own boot"
+ph 'C=$(awk "/aoc-snd-card/{print \$1; exit}" /proc/asound/cards); echo "RTLOG controls: $(amixer -c $C controls | grep -c RTLOG)"' |
+  grep -c 'RTLOG controls: 10' >/dev/null || stop "not 10 RTLOG controls (the protection firmware isn't loaded?)"
+can17=1
+grep -c '^speaker_protection: Y' <<<"$rep" >/dev/null || { can17=0; say "speaker_protection is not Y: G3 and G4 can't run"; }
+grep -c '^stamp: .*firmware matches' <<<"$rep" >/dev/null || { can17=0; say "no stamp for this firmware: G3 and G4 can't run"; }
+ph "if [ -e $CONF ]; then cp -a $CONF $CONF.gain17-probe; else : > $CONF.gain17-none; fi" || stop "could not save $CONF"
+saved=1
+ph "$SP signal tone /tmp/t1k30.wav --level -30 --seconds 3 && $SP signal tone /tmp/t1k23.wav --level -23 --seconds 3" ||
+  stop "could not make the test tones"
+
+say "G1: the feedback stream alone (no sound)"
+out=$(ph "$SP feedback start --seconds 5; sleep 1; $SP feedback status; sleep 6; $SP feedback status; dmesg | tail -n 20")
+grep -c 'hostless PCM device [0-9]* (state: RUNNING)' <<<"$out" >/dev/null &&
+  [[ $(grep 'feedback\|holder' <<<"$out" | tail -n1) == *"not running"* ]] || stop "the feedback stream did not run and stop cleanly"
+if grep -iE 'oops|BUG:|cs35l41.*(error|fail)|aoc.*(error|fail)' <<<"$out"; then stop "an error in the kernel log"; fi
+
+say "G2: impedance at 737/10 (stage media)"
+lvl 737 10 media || stop "could not set stage media 737/10"
+ask "a 3 s, -23 dBFS 1 kHz tone on both speakers at the everyday level"
+tb /tmp/t1k23.wav 3 1 0
+[[ $result == CLEAN* ]] || stop "tripped at 737/10"
+g2_top=$z_top g2_bottom=$z_bottom
+sleep 30
+ask "the same tone again, with the feedback stream"
+tb /tmp/t1k23.wav 3 1 1
+[[ $result == CLEAN* ]] || stop "tripped at 737/10 with the feedback stream"
+for z in "$g2_top" "$g2_bottom" "$z_top" "$z_bottom"; do
+  [[ $z == none ]] || near "$z" 0.90 1.10 || stop "Z/CAL_R $z at 737/10 is off by more than 10 %"
+done
+((can17)) || stop "G3 and G4 need speaker_protection=1 and a stamp (see above)"
+
+say "G3: 817/17 (stage c9-probe), feedback off"
+lvl 817 17 c9-probe || stop "could not set stage c9-probe 817/17"
+say "resting 60 s before the first gain-17 burst"; sleep 60
+ask "ONE 1 s, -30 dBFS 1 kHz tone at analog gain 17 (stock's gain), feedback off"
+tb /tmp/t1k30.wav 1 1 0
+g3=$result g3_top=$z_top g3_bottom=$z_bottom
+lvl 737 10 media || stop "could not return to 737/10"
+
+say "G4: 817/17 with the feedback stream"
+lvl 817 17 c9-probe || stop "could not set stage c9-probe 817/17"
+say "resting 60 s"; sleep 60
+ask "ONE 1 s, -30 dBFS 1 kHz tone at analog gain 17, with the feedback stream"
+tb /tmp/t1k30.wav 1 1 1
+g4=$result
+lvl 737 10 media || stop "could not return to 737/10"
+
+say "summary (record in AOC-PLAN.md C9i with the date and uname -r)"
+say "G2 737/10: Z/CAL_R top $g2_top, bottom $g2_bottom"
+say "G3 817/17 FB off: ${g3%%:*}; Z/CAL_R top $g3_top, bottom $g3_bottom"
+say "G4 817/17 FB on: ${g4%%:*}"
+if [[ $g3 == TRIPPED* && $g4 == CLEAN* ]]; then
+  row="step 4 CLEAN where step 3 tripped: the V/I stream is what the firmware needs. Next: OMAMOBILE_SPK_FEEDBACK=1, then the C9i gate (verify --at-level 817 17)"
+elif [[ $g3 == CLEAN* ]]; then
+  row="no trip at 817/17 with feedback off: not the C9d-3..6 behaviour. Record it, repeat G3 once before drawing anything from it"
+elif near "$g3_top" 1.06 1.20 || near "$g3_bottom" 1.06 1.20; then
+  row="Z/CAL_R near 1.10 at 817/17 (near 1.00 at 737/10): the sense scale depends on the gain. Next: G5, the register snapshots at 737/10 and 817/17 (tools/aoc-amp-diag MODE=snapshot) and their diff"
+elif [[ $g3_top == none && $g3_bottom == none ]]; then
+  row="not measurable at 817/17 and the reading jumps: the open-loop estimate runs away. Next: G4 tripped too, so 737/17 with mt10 (vmon low must go to 0), then OMAMOBILE_SPK_CAL_ORDER=stock and one 1 s burst"
+elif near "$g3_top" 0.97 1.05 || near "$g3_bottom" 0.97 1.05; then
+  row="Z/CAL_R near 1.00 at 817/17 and the reading jumps: the temperature isn't computed from that impedance. Next: OMAMOBILE_SPK_CAL_ORDER=stock and one 1 s burst"
+else
+  row="no row of the table fits: record the lines, then the stock capture (C9j)"
+fi
+say "C9d-8 table: $row"

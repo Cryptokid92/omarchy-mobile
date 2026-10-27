@@ -12,6 +12,127 @@
 # Limits as C7d: digital at most 657 (-20 dB), analog 6 (top) or 10
 # (bottom; 6 is used for both). The route and the analog gains are set back to 0 at the end.
 # No devmem.
+#
+# MODE=snapshot (AOC-PLAN.md C9d-8 and C9i; read-only, plays nothing, sets
+# nothing): one read of every CS35L41 register below 0x10100 of both
+# amplifiers, while the caller plays a tone (tools/speaker-trip-burst in
+# another terminal). Waits up to 10 s for a running speaker PCM (WAIT=0: no
+# wait), then DELAY seconds (0.3), then reads. One register per read call, at
+# its own offset in the regmap debugfs file, so nothing past the first
+# register above 0x10100 is ever read: the file goes on into the DSP's
+# memories and core registers, and reading those froze the protection
+# algorithm (C9a). POSIX sh, so stock's shell runs it too (rooted, slot A:
+# AOC-PLAN C9j); python3 makes it fast, dd is the fallback.
+#   tools/phone-ssh 'MODE=snapshot LABEL=737-10 bash -s' < tools/aoc-amp-diag > logs/amp-regs-737-10.txt
+# diff (on the laptop, no phone): the registers that differ between two
+# snapshots, by name, without AMP_GAIN_CTRL (0x6c04; ALL=1 keeps it) and with
+# the status registers marked. Snapshots stay in logs/ (gitignored); quote
+# only the diff lines in a plan.
+#   tools/aoc-amp-diag diff logs/amp-regs-737-10.txt logs/amp-regs-817-17.txt
+if [ "${MODE:-tone}" = snapshot ]; then
+  read_regs() {  # FILE AMP: one register per read, stop after the first above 0x10100
+    if command -v python3 >/dev/null 2>&1; then
+      python3 - "$1" "$2" <<'PY'
+import os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY)
+first = os.pread(fd, 64, 0).split(b'\n')[0]
+n, off = len(first) + 1, 0
+while True:
+    line = os.pread(fd, n, off)
+    if len(line) < n or b':' not in line:
+        break
+    if int(line.split(b':')[0], 16) > 0x10100:
+        break
+    print(sys.argv[2], line.decode().strip())
+    off += n
+PY
+    else
+      first=$(head -c 64 "$1" | head -n 1)
+      n=$((${#first} + 1)) i=0
+      while :; do
+        line=$(dd if="$1" bs="$n" skip="$i" count=1 2>/dev/null)
+        [ -n "$line" ] || break
+        a=$(printf '%d' "0x${line%%:*}" 2>/dev/null) || break
+        [ "$a" -gt 65792 ] && break
+        echo "$2 $line"
+        i=$((i + 1))
+      done
+    fi
+  }
+  echo "# aoc-amp-diag snapshot ${LABEL:-}, kernel $(uname -r)"
+  run=no
+  for _ in $(seq 50); do
+    for s in /proc/asound/card*/pcm*p/sub0/status; do
+      grep -c 'RUNNING' "$s" >/dev/null 2>&1 && run=yes
+    done
+    [ "$run" = yes ] || [ "${WAIT:-1}" = 0 ] && break
+    sleep 0.2
+  done
+  echo "# a playback PCM running: $run"
+  sleep "${DELAY:-0.3}"
+  if command -v amixer >/dev/null 2>&1; then
+    C=$(awk '/aoc-snd-card/{print $1; exit}' /proc/asound/cards)
+    for p in Top Bottom; do
+      echo "# $p levels $(amixer -c "$C" cget "name=$p Digital PCM Volume" 2>/dev/null | sed -n 's/^ *: values=//p')/$(amixer -c "$C" cget "name=$p Analog PCM Volume" 2>/dev/null | sed -n 's/^ *: values=//p')"
+    done
+  fi
+  found=0
+  for d in /sys/kernel/debug/regmap/*; do
+    case $(cat "$d/name" 2>/dev/null) in *cs35l41*) ;; *) continue ;; esac
+    dev=${d##*/}
+    case $(readlink -f "/sys/bus/spi/devices/${dev%%-*}/of_node" 2>/dev/null) in
+      *@0) amp=Top ;; *@1) amp=Bottom ;; *) amp=$dev ;;
+    esac
+    [ -r "$d/registers" ] || continue
+    read_regs "$d/registers" "$amp"
+    found=$((found + 1))
+  done
+  [ "$found" -gt 0 ] || { echo "# no cs35l41 regmap in debugfs (root? debugfs mounted?)"; exit 1; }
+  exit 0
+fi
+if [[ ${1:-} == diff ]]; then
+  [[ -r ${2:-} && -r ${3:-} ]] || { echo "Usage: tools/aoc-amp-diag diff SNAPSHOT-A SNAPSHOT-B" >&2; exit 2; }
+  echo "A: $(head -n1 "$2")"; echo "B: $(head -n1 "$3")"
+  # register names from mainline include/sound/cs35l41.h; "status" marks
+  # registers that change by themselves (status, interrupts, monitors)
+  awk -v all="${ALL:-0}" '
+    BEGIN {
+      split("2014 PWR_CTRL1 2018 PWR_CTRL2 201c PWR_CTRL3 2020 CTRL_OVRRIDE 2024 AMP_OUT_MUTE " \
+        "2900 PWRMGT_CTL 2904 WAKESRC_CTL 2908 PWRMGT_STS:status 2c04 PLL_CLK_CTRL 2c08 DSP_CLK_CTRL " \
+        "2c0c GLOBAL_CLK_CTRL 2c10 DATA_FS_SEL 2d10 TST_FS_MON0:status 3800 BSTCVRT_VCTRL1 3804 BSTCVRT_VCTRL2 " \
+        "3808 BSTCVRT_PEAK_CUR 380c BSTCVRT_SFT_RAMP 3810 BSTCVRT_COEFF 3814 BSTCVRT_SLOPE_LBST " \
+        "3818 BSTCVRT_SW_FREQ 381c BSTCVRT_DCM_CTRL 3820 BSTCVRT_DCM_MODE_FORCE 3830 BSTCVRT_OVERVOLT_CTRL " \
+        "4000 VI_VOL_POL 4100 VIMON_SPKMON_RESYNC 4220 DTEMP_WARN_THLD 4224 DTEMP_CFG 4308 DTEMP_EN " \
+        "4400 VPVBST_FS_SEL 4800 SP_ENABLES 4804 SP_RATE_CTRL 4808 SP_FORMAT 480c SP_HIZ_CTRL " \
+        "4810 SP_FRAME_TX_SLOT 4820 SP_FRAME_RX_SLOT 4830 SP_TX_WL 4840 SP_RX_WL 4854 ASP_CONTROL4 " \
+        "4c00 DAC_PCM1_SRC 4c20 ASP_TX1_SRC 4c24 ASP_TX2_SRC 4c28 ASP_TX3_SRC 4c2c ASP_TX4_SRC " \
+        "4c40 DSP1_RX1_SRC 4c44 DSP1_RX2_SRC 4c48 DSP1_RX3_SRC 4c4c DSP1_RX4_SRC 4c50 DSP1_RX5_SRC " \
+        "4c54 DSP1_RX6_SRC 4c58 DSP1_RX7_SRC 4c5c DSP1_RX8_SRC 4c60 NGATE1_SRC 4c64 NGATE2_SRC " \
+        "6000 AMP_DIG_VOL_CTRL 6404 VPBR_CFG 6408 VBBR_CFG 640c VPBR_STATUS:status 6410 VBBR_STATUS:status " \
+        "6414 OVERTEMP_CFG 6418 AMP_ERR_VOL 6450 VOL_STATUS_TO_DSP:status 6800 CLASSH_CFG 6804 WKFET_CFG " \
+        "6808 NG_CFG 6c04 AMP_GAIN_CTRL 706c DIGPWM_IOCTRL 7400 DAC_MSM_CFG 8000 TEMP_WARN:status " \
+        "10000 IRQ1_CFG 10004 IRQ1_STATUS:status 10010 IRQ1_STATUS1:status 10014 IRQ1_STATUS2:status " \
+        "10018 IRQ1_STATUS3:status 1001c IRQ1_STATUS4:status 10090 IRQ1_RAW_STATUS1:status " \
+        "10094 IRQ1_RAW_STATUS2:status 10098 IRQ1_RAW_STATUS3:status 1009c IRQ1_RAW_STATUS4:status", t, " ")
+      for (i = 1; i < length(t); i += 2) name[t[i]] = t[i + 1]
+    }
+    function key(a) { a = tolower(a); sub(/:$/, "", a); sub(/^0+/, "", a); return a }
+    /^#/ { next }
+    FNR == NR { va[$1 " " key($2)] = $3; next }
+    { k = $1 " " key($2); seen[k] = 1
+      if (!(k in va)) { print "only in B: " $0; next }
+      if (va[k] == $3) next
+      n = (key($2) in name) ? name[key($2)] : "?"
+      if (n == "AMP_GAIN_CTRL" && all != 1) { gain++; next }
+      st = (n ~ /:status$/) ? " (status: changes by itself)" : ""
+      sub(/:status$/, "", n)
+      printf "%-6s 0x%s %-22s A %s  B %s%s\n", $1, key($2), n, va[k], $3, st; d++ }
+    END {
+      for (k in va) if (!(k in seen)) print "only in A: " k " " va[k]
+      printf "%d register(s) differ%s\n", d + 0, gain ? " (besides AMP_GAIN_CTRL, as expected)" : ""
+    }' "$2" "$3"
+  exit 0
+fi
 set -u
 AMP=${AMP:-bottom}
 CH=${CH:-LR}
