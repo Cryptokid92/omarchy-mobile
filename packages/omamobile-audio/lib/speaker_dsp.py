@@ -16,7 +16,12 @@ Used by omamobile-speaker-protection (AOC-PLAN.md stages C8/C9):
                     Mutes both amplifiers (through "omamobile-speaker-protection
                     mute") on any failure and exits
   verify            the watch checks plus liveness and plausibility over a few
-                    seconds of playback; exit 0 only if all pass
+                    seconds of playback; exit 0 only if all pass. With
+                    --at-level, the gate stage c9 needs (AOC-PLAN C9i): during
+                    one short burst, the firmware senses the coil (vmon low 0),
+                    measures a plausible impedance (Z/CAL_R 0.97-1.05), and its
+                    coil temperature rises by less than 1 C and falls again
+                    after the burst
   signal            write a test signal (1 kHz tone or pink multitone) as WAV
 
 Controls are read through alsa-lib (ctypes), one element at a time by name.
@@ -234,6 +239,13 @@ class JsonCtl:
             v = 0
             for b in c['v']:
                 v = (v << 8) | b
+            tf = os.environ.get('FAKE_TEMP_FILE')
+            if tf and name.endswith('CSPL_TEMPERATURE'):
+                try:                 # the fake coil temperature, in C, from the test
+                    with open(tf) as f:
+                        return int(float(f.read()) * 16384)
+                except (OSError, ValueError):
+                    pass
             frozen = os.path.exists(os.environ.get('FAKE_HB_FREEZE_FILE', '/nonexistent'))
             if name.endswith('HALO_HEARTBEAT') and os.environ.get('FAKE_HB_STUCK') != '1' and not frozen:
                 v += 1           # the firmware's heartbeat moves while it runs
@@ -474,33 +486,93 @@ def kmsg_problems(records, since=0.0):
 
 # --- limits and checks --------------------------------------------------------
 
+# The earpiece (the top amplifier with its DSP bypassed, as stock's handset
+# path): analog 6 at most in every stage (AUDIO-PLAN.md section 4; stock's
+# in-call 7 waits on C9), digital at most the media stage's.
+EARPIECE_DIGITAL_CEIL = 737
+EARPIECE_ANALOG_CEIL = 6
+MODES = ('speaker', 'earpiece')
+
+
+def state_dir():
+    return os.environ.get('OMAMOBILE_STATE', '/var/lib/omamobile')
+
+
+def stamp_levels(path=None):
+    """{amp: (digital, analog)} that a verification stamp taken with
+    --at-level was taken at; None for no stamp or a stamp without the gate."""
+    path = path or os.path.join(state_dir(), 'speaker-protection-verified')
+    try:
+        with open(path) as f:
+            text = f.read()
+    except OSError:
+        return None
+    if not re.search(r'^checks at-level$', text, re.M):
+        return None
+    m = re.search(r'^levels Top (\d+)/(\d+) Bottom (\d+)/(\d+)$', text, re.M)
+    if not m:
+        return None
+    return {'Top': (int(m[1]), int(m[2])), 'Bottom': (int(m[3]), int(m[4]))}
+
+
 def ceilings():
     """This stage's ceilings, the same numbers the service checks before it
-    unmutes: digital, then analog per amplifier (c8: the top drives the
-    earpiece, AUDIO-PLAN.md section 4; c9: stock's 817 and 17 on both)."""
+    unmutes, per amplifier: digital, then analog (c8: the top drives the
+    earpiece, AUDIO-PLAN.md section 4; c9-probe: stock's 817 and 17 on both,
+    for short research bursts; c9: stock's at most, and never above the
+    levels the verification stamp was taken at)."""
     stage = os.environ.get('OMAMOBILE_SPK_STAGE') or 'media'
+    both = lambda d: {a: d for a in AMPS}
     if stage == 'c9':
-        return 817, {'Top': 17, 'Bottom': 17}
+        lv = stamp_levels()
+        if lv is None:                 # the service refuses this; mute anything audible
+            return both(0), both(0)
+        return ({a: min(817, lv[a][0]) for a in AMPS}, {a: min(17, lv[a][1]) for a in AMPS})
+    if stage == 'c9-probe':
+        return both(817), both(17)
     if stage == 'media':
-        return 737, {'Top': 10, 'Bottom': 10}
-    return 657, {'Top': 6, 'Bottom': 10}
+        return both(737), both(10)
+    return both(657), {'Top': 6, 'Bottom': 10}
 
 
-def check(v, digital_ceil, analog_ceil, temp_max, strict=True):
+def speaker_mode():
+    """The mode omamobile-speaker-protection last set: speaker (the default,
+    no file) or earpiece; anything else is returned as it is (and refused)."""
+    try:
+        with open(os.path.join(os.environ.get('OMAMOBILE_RUN', '/run/omamobile'), 'speaker-mode')) as f:
+            return f.read().strip()
+    except OSError:
+        return 'speaker'
+
+
+def check(v, digital_ceil, analog_ceil, temp_max, strict=True, mode='speaker'):
     """Problems with one reading of both amplifiers (empty if none). With
-    strict, the checks that only hold once the DSP runs a stream are on."""
+    strict, the checks that only hold once the DSP runs a stream are on. In
+    earpiece mode the top amplifier may bypass its DSP (PCM Source ASP) at
+    the earpiece's ceilings, and the bottom one must be muted."""
     problems = []
+    if mode not in MODES:
+        problems.append(f'unknown speaker mode {mode!r}')
     for amp in AMPS:
         g = lambda k: v.get((amp, k))
-        if g('PCM Source') != 'DSP':
-            problems.append(f'{amp}: PCM Source is {g("PCM Source")}, not DSP')
+        src = g('PCM Source')
+        dc, ac = digital_ceil[amp], analog_ceil[amp]
+        ear_top = mode == 'earpiece' and amp == 'Top'
+        if ear_top:
+            dc, ac = min(dc, EARPIECE_DIGITAL_CEIL), min(ac, EARPIECE_ANALOG_CEIL)
+            if src not in ('ASP', 'DSP'):
+                problems.append(f'{amp}: PCM Source is {src}, not ASP or DSP (earpiece mode)')
+        elif src != 'DSP':
+            problems.append(f'{amp}: PCM Source is {src}, not DSP')
         d, a = g('Digital PCM Volume'), g('Analog PCM Volume')
-        if d is None or d > digital_ceil:
-            problems.append(f'{amp}: Digital PCM Volume {d} above {digital_ceil}')
-        if a is None or a > analog_ceil[amp]:
-            problems.append(f'{amp}: Analog PCM Volume {a} above {analog_ceil[amp]}')
-        if not strict:
-            continue
+        if d is None or d > dc:
+            problems.append(f'{amp}: Digital PCM Volume {d} above {dc}')
+        if a is None or a > ac:
+            problems.append(f'{amp}: Analog PCM Volume {a} above {ac}')
+        if mode == 'earpiece' and amp == 'Bottom' and d not in (None, 0):
+            problems.append(f'{amp}: Digital PCM Volume {d} in earpiece mode, not muted')
+        if not strict or (ear_top and src == 'ASP'):
+            continue             # the top DSP is out of the path in earpiece mode
         if g('HALO_STATE') != HALO_RUN:
             problems.append(f'{amp}: HALO_STATE {g("HALO_STATE")}, not running')
         if g('CSPL_STATE') != 0:
@@ -1057,7 +1129,7 @@ def cmd_watch(args):
     # the protection algorithm stopped while audio may still pass (C9a: it
     # froze after a full regmap read and the speakers kept playing). Enforced
     # in every stage; OMAMOBILE_SPK_HEARTBEAT=0 only logs it, and only in c8.
-    strict_hb = os.environ.get('OMAMOBILE_SPK_STAGE', 'c8') == 'c9' or \
+    strict_hb = os.environ.get('OMAMOBILE_SPK_STAGE', 'c8').startswith('c9') or \
         os.environ.get('OMAMOBILE_SPK_HEARTBEAT', '1') != '0'
     temp_max = float(os.environ.get('OMAMOBILE_SPK_TEMP_MAX', '80'))
     # A real coil warms by tenths of a degree in a few seconds at these
@@ -1134,6 +1206,10 @@ def watch_loop(args, amps, devs, kmsg, pcm, digital_ceil, analog_ceil, temp_max,
             log(reason)
             mute(reason)
             return 1
+        # The mode is read before and after the amplifiers: omamobile-speaker-
+        # protection mode changes it between its writes, so a reading taken
+        # across a change is checked again next round, not judged.
+        mode = speaker_mode()
         if not running(pcm):
             if since is not None and feedback:
                 feedback.stop()
@@ -1141,7 +1217,10 @@ def watch_loop(args, amps, devs, kmsg, pcm, digital_ceil, analog_ceil, temp_max,
             problems_fb = []
             # Levels are checked when idle too: nobody raises them by hand.
             v = amps.read(AMP_KEYS)
-            problems = check(v, digital_ceil, analog_ceil, temp_max, strict=False)
+            if speaker_mode() != mode:
+                time.sleep(args.interval)
+                continue
+            problems = check(v, digital_ceil, analog_ceil, temp_max, strict=False, mode=mode)
         else:
             if since is None:
                 since = now
@@ -1166,7 +1245,11 @@ def watch_loop(args, amps, devs, kmsg, pcm, digital_ceil, analog_ceil, temp_max,
                     else:
                         log(f'watchdog: {amp}: stock media delta applied')
             v = amps.read()
-            problems = check(v, digital_ceil, analog_ceil, temp_max, strict=strict) + problems_delta + problems_fb
+            if speaker_mode() != mode:
+                time.sleep(args.interval)
+                continue
+            problems = (check(v, digital_ceil, analog_ceil, temp_max, strict=strict, mode=mode)
+                        + problems_delta + problems_fb)
             for amp in AMPS:
                 t = q(v.get((amp, 'CSPL_TEMPERATURE')), 14)
                 if t is not None:
@@ -1202,19 +1285,35 @@ def watch_loop(args, amps, devs, kmsg, pcm, digital_ceil, analog_ceil, temp_max,
     return 0
 
 
+def levels_line(v):
+    return ' '.join(f'{a} {v.get((a, "Digital PCM Volume"))}/{v.get((a, "Analog PCM Volume"))}' for a in AMPS)
+
+
 def cmd_verify(args):
     digital_ceil, analog_ceil = ceilings()
     temp_max = float(os.environ.get('OMAMOBILE_SPK_TEMP_MAX', '80'))
+    if args.at_level is not None and len(args.at_level) not in (0, 2):
+        print('not verified: --at-level takes no levels or two (DIGITAL ANALOG)')
+        return 2
+    if speaker_mode() != 'speaker':
+        print(f'not verified: the amplifiers are in {speaker_mode()} mode (omamobile-speaker-protection mode speaker)')
+        return 1
     amps = Amps(args.card)
     pcm = speaker_pcm_status(args.card)
-    missing = [f'{a} {k}' for (a, k), n in amps.names.items() if n is None and k in
-               ('HALO_STATE', 'HALO_HEARTBEAT', 'CSPL_STATE', 'CSPL_ERRORNO', 'CAL_SET_STATUS', 'CSPL_TEMPERATURE')]
+    need = ('HALO_STATE', 'HALO_HEARTBEAT', 'CSPL_STATE', 'CSPL_ERRORNO', 'CAL_SET_STATUS', 'CSPL_TEMPERATURE')
+    if args.at_level is not None:
+        need += ('BDLOG_VMON_LOW_FLAG', 'CAL_R', 'CAL_R_SELECTED', 'BDLOG_OVER_TEMP_COUNT',
+                 'BDLOG_OVER_EXC_COUNT') + RTLOG_KEYS
+    missing = [f'{a} {k}' for (a, k), n in amps.names.items() if n is None and k in need]
     if missing:
         print('not verified: no control for ' + ', '.join(missing))
         return 1
+    if args.at_level is not None:
+        return verify_at_level(args, amps, pcm, digital_ceil, analog_ceil, temp_max)
     first, last, temps = {}, {}, {a: [] for a in AMPS}
     end = time.monotonic() + args.seconds
     problems = []
+    v = {}
     while time.monotonic() < end:
         if not running(pcm):
             print('not verified: the speaker PCM is not running (play the test signal while this runs)')
@@ -1244,6 +1343,124 @@ def cmd_verify(args):
         return 1
     print('verified: both DSPs run the protection firmware with the calibration applied, '
           f'heartbeat moving, coil temperatures {", ".join(f"{a} {temps[a][-1]:.2f} C" for a in AMPS)}')
+    print('checks: basic')
+    print(f'levels: {levels_line(v)}')
+    return 0
+
+
+def verify_at_level(args, amps, pcm, digital_ceil, analog_ceil, temp_max):
+    """The gate before stage c9 (AOC-PLAN C9i): one burst of --burst seconds
+    at the levels being verified, sampled from its start to --after seconds
+    past its end. Both amplifiers must, besides the basic checks:
+      - sense the coil: BDLOG_VMON_LOW_FLAG 0 in every sample from --settle s
+        into the burst to its end (vmon low 1 means the model runs open loop);
+      - measure a plausible coil: the firmware's own Z/CAL_R valid in at
+        least half the samples, and its median within --z-low..--z-high;
+      - track the signal: the coil temperature rises during the burst by at
+        least --min-rise and less than --max-rise C, peaks no later than 1 s
+        after the burst, and falls back by at least --min-fall of that rise
+        by the end (a reading that sits still, or keeps climbing, is a model
+        that doesn't follow the coil);
+      - keep R_selected = CAL_R, the over-temperature and over-excursion
+        counts unchanged, and the levels steady (and equal to the ones
+        asked for, if any).
+    Prints ratios and temperatures only, never a calibration value."""
+    want = tuple(args.at_level) if args.at_level else None
+    deadline = time.monotonic() + args.wait
+    while not running(pcm):
+        if time.monotonic() > deadline:
+            print(f'not verified: no speaker stream started within {args.wait:g} s (start the burst)')
+            return 1
+        time.sleep(0.02)
+    t0 = time.monotonic()
+    problems = rtlog_arm(amps)
+    if problems:
+        print('not verified: the impedance logger: ' + '; '.join(problems))
+        return 1
+    samples = []                       # (seconds into the burst, playing, reading)
+    z = {a: [] for a in AMPS}
+    next_z = t0 + args.z_start
+    levels = None
+    while not problems:
+        t = time.monotonic() - t0
+        if t > args.burst + args.after:
+            break
+        playing = t < args.burst
+        if playing and not running(pcm):
+            problems.append(f'the speaker stream stopped {t:.1f} s into a {args.burst:g} s burst')
+            break
+        v = amps.read()
+        problems += check(v, digital_ceil, analog_ceil, temp_max, strict=playing)
+        lv = {a: (v.get((a, 'Digital PCM Volume')), v.get((a, 'Analog PCM Volume'))) for a in AMPS}
+        if levels is None:
+            levels = (lv, levels_line(v))
+            if want and any(lv[a] != want for a in AMPS):
+                problems.append(f'the amplifiers are at {levels[1]}, not {want[0]}/{want[1]} on both')
+        elif lv != levels[0]:
+            problems.append(f'the levels changed during the burst ({levels[1]} -> {levels_line(v)})')
+        samples.append((t, playing, v))
+        if playing and time.monotonic() >= next_z and len(z['Top']) < args.z_rounds:
+            for a in AMPS:
+                z[a].append(rtlog_sample(amps, a))
+            next_z += args.z_interval
+        time.sleep(args.interval)
+    report = []
+    for a in AMPS:
+        g = lambda s, k: s[2].get((a, k))
+        sensed = [s for s in samples if s[1] and s[0] >= args.settle]
+        if not sensed:
+            problems.append(f'{a}: no sample between {args.settle:g} s and the end of the burst')
+        low = [s for s in sensed if g(s, 'BDLOG_VMON_LOW_FLAG') != 0]
+        if low:
+            problems.append(f'{a}: vmon low {g(low[0], "BDLOG_VMON_LOW_FLAG")} at {low[0][0]:.1f} s: '
+                            'the firmware does not sense the coil at this level (open loop)')
+        if any(g(s, 'CAL_R') != g(s, 'CAL_R_SELECTED') for s in samples):
+            problems.append(f'{a}: R_selected is not CAL_R')
+        for k in ('BDLOG_OVER_TEMP_COUNT', 'BDLOG_OVER_EXC_COUNT'):
+            if samples and g(samples[0], k) != g(samples[-1], k):
+                problems.append(f'{a}: {k} moved ({g(samples[0], k)} -> {g(samples[-1], k)})')
+        cal = g(samples[-1], 'CAL_R') if samples else None
+        good = sorted(w for w in z[a] if w is not None and w < RTLOG_INVALID)
+        zs = '-'
+        if not cal or len(good) * 2 < max(1, len(z[a])) or not good:
+            problems.append(f'{a}: Z/CAL_R valid in {len(good)} of {len(z[a])} samples (the firmware '
+                            'measured no impedance: signal too low, or no sense)')
+        else:
+            med = good[len(good) // 2] / cal
+            zs = f'{med:.3f} ({len(good)}/{len(z[a])} valid)'
+            if not args.z_low <= med <= args.z_high:
+                problems.append(f'{a}: Z/CAL_R {med:.3f} outside {args.z_low}-{args.z_high}')
+        temps = [(s[0], q(g(s, 'CSPL_TEMPERATURE'), 14)) for s in samples]
+        temps = [(t, c) for t, c in temps if c is not None]
+        if len(temps) < 3 or not any(t >= args.burst for t, _ in temps):
+            problems.append(f'{a}: too few temperature samples to see the burst and after it')
+            report.append(f'{a:6} vmon low {"1" if low else "0"}, Z/CAL_R {zs}')
+            continue
+        start = temps[0][1]
+        t_peak, peak = max(temps, key=lambda x: x[1])
+        end = temps[-1][1]
+        rise = peak - start
+        if args.room is not None and abs(start - args.room) > args.room_tolerance:
+            problems.append(f'{a}: first coil reading {start:.2f} C, more than {args.room_tolerance:g} C '
+                            f'from the room ({args.room:g} C)')
+        if rise >= args.max_rise:
+            problems.append(f'{a}: coil reading rose {rise:.2f} C, not less than {args.max_rise:g} C')
+        elif rise < args.min_rise:
+            problems.append(f'{a}: coil reading rose {rise:.2f} C: it does not move with the signal')
+        elif t_peak > args.burst + 1.0 or peak - end < args.min_fall * rise:
+            problems.append(f'{a}: coil reading peaked at {t_peak:.1f} s and ended at {end - start:+.2f} C: '
+                            'it does not fall after the burst')
+        report.append(f'{a:6} vmon low {"1" if low else "0"}, Z/CAL_R {zs}, coil {start:.2f} C, '
+                      f'rise {rise:+.2f} C at {t_peak:.1f} s, {end - start:+.2f} C at the end')
+    for line in report:
+        print('  ' + line)
+    if problems:
+        print('not verified at level: ' + '; '.join(problems))
+        return 1
+    print('verified at level: both amplifiers sense the coil (vmon low 0), measure a plausible '
+          'impedance and track the signal')
+    print('checks: at-level')
+    print(f'levels: {levels[1]}')
     return 0
 
 
@@ -1308,6 +1525,25 @@ def main(argv):
     v.add_argument('--temp-low', type=float, default=10.0)
     v.add_argument('--temp-high', type=float, default=45.0)
     v.add_argument('--temp-spread', type=float, default=5.0)
+    v.add_argument('--at-level', type=int, nargs='*', default=None, metavar='LEVEL',
+                   help='the gate for stage c9 (AOC-PLAN C9i), optionally that both amplifiers are at DIGITAL ANALOG')
+    v.add_argument('--burst', type=float, default=float(env('OMAMOBILE_VERIFY_BURST', '5.0')),
+                   help='at-level: the length of the burst being played, s')
+    v.add_argument('--after', type=float, default=float(env('OMAMOBILE_VERIFY_AFTER', '4.0')),
+                   help='at-level: how long to keep sampling after the burst, s')
+    v.add_argument('--wait', type=float, default=float(env('OMAMOBILE_VERIFY_WAIT', '15.0')),
+                   help='at-level: how long to wait for the burst to start, s')
+    v.add_argument('--settle', type=float, default=float(env('OMAMOBILE_VERIFY_SETTLE', '1.5')))
+    v.add_argument('--z-start', type=float, default=float(env('OMAMOBILE_VERIFY_Z_START', '0.3')))
+    v.add_argument('--z-rounds', type=int, default=int(env('OMAMOBILE_VERIFY_Z_ROUNDS', '5')))
+    v.add_argument('--z-interval', type=float, default=float(env('OMAMOBILE_VERIFY_Z_INTERVAL', '0.2')))
+    v.add_argument('--z-low', type=float, default=0.97)
+    v.add_argument('--z-high', type=float, default=1.05)
+    v.add_argument('--min-rise', type=float, default=0.02)
+    v.add_argument('--max-rise', type=float, default=1.0)
+    v.add_argument('--min-fall', type=float, default=0.25, help='fraction of the rise')
+    v.add_argument('--room', type=float, default=None, help='the room temperature, C')
+    v.add_argument('--room-tolerance', type=float, default=1.0)
     fb = sub.add_parser('feedback')
     fb.add_argument('action', choices=('start', 'stop', 'status'))
     fb.add_argument('--seconds', type=float, default=120.0, help='start: stop by itself after this long (0: never)')

@@ -34,6 +34,15 @@ if command -v alsaucm >/dev/null && [[ -r /usr/share/alsa/ucm2/ucm.conf ]]; then
   [[ $(ucm get PlaybackPCM/Speaker/HiFi) == *"hw:0,5" ]] || fail "UCM: Speaker PCM"
   [[ $(ucm get CapturePCM/Mic/HiFi) == *"hw:0,8" ]] || fail "UCM: Mic PCM"
   pass "UCM profile parses: HiFi with Speaker and Mic"
+  # Voice Call: after HiFi, never first; Earpiece, Speaker and Mic; the
+  # earpiece below the speaker, so never a default
+  out=$(ucm list _verbs)
+  [[ $out == *"0: HiFi"* && $out == *"1: Voice Call"* ]] || { echo "$out" >&2; fail "UCM: Voice Call after HiFi"; }
+  out=$(ucm list "_devices/Voice Call")
+  [[ $out == *"Earpiece"* && $out == *"Speaker"* && $out == *"Mic"* ]] || { echo "$out" >&2; fail "UCM: Voice Call devices"; }
+  ep=$(ucm get "PlaybackPriority/Earpiece/Voice Call" | sed -n 's/.*= *//p'); spk=$(ucm get "PlaybackPriority/Speaker/Voice Call" | sed -n 's/.*= *//p')
+  [[ -n $ep && -n $spk ]] && ((ep < spk)) || fail "UCM: the earpiece has a lower priority than the speaker ($ep, $spk)"
+  pass "UCM profile parses: Voice Call after HiFi, Earpiece below Speaker"
   # tegu: its own long-name file in the same conf.d directory
   # The long-name file must be named exactly as alsa-ucm-conf looks it up, or
   # alsa falls back to the shared profile and cheetah's microphone list.
@@ -60,7 +69,22 @@ tegu_card=$(sed -n 's/.*api.alsa.card.name = "\([^"]*\)".*/\1/p' wireplumber/52-
 [[ -f "ucm2/conf.d/aoc-snd-card/$tegu_card.conf" ]] || fail "tegu long-name UCM file is named exactly $tegu_card.conf"
 grep -c "channelmix.max-volume = 0.562" wireplumber/52-omamobile-tegu-aoc.conf >/dev/null || fail "the 9a's speaker sink is capped (channelmix.max-volume)"
 grep -c "CAPTURE LIST' 0,1,-1,-1" ucm2/Google/tegu/HiFi.conf >/dev/null || fail "tegu HiFi must set its own mic list (cheetah's 0,3,2 kills the AoC)"
-if grep -E "cset .*(PCM Volume|PCM Source|DSP|Analog|Digital)" ucm2/Google/cheetah/HiFi.conf ucm2/Google/tegu/HiFi.conf; then
+# The voice verb: only the amplifiers' mode, through the protection service;
+# the AoC's call routes and PCMs belong to omamobile-sitd
+v=ucm2/Google/cheetah/VoiceCall.conf
+if grep -E "cset .*(EP5|EP4|Voice Call|Incall)|PlaybackPCM|CapturePCM" "$v"; then fail "Voice Call leaves the call routes and PCMs to sitd"; fi
+[[ $(grep -c '^\s*exec ' "$v") == 3 ]] && ! grep -E '^\s*exec ' "$v" | grep -vE '"/usr/bin/systemctl start omamobile-speaker-mode@(earpiece|speaker)\.service"$' ||
+  fail "Voice Call execs only the two mode units"
+grep -c 'Voice Call' ucm2/conf.d/aoc-snd-card/aoc-snd-card.conf >/dev/null || fail "Voice Call registered"
+grep -cF 'action.lookup("verb") == "start"' polkit/50-omamobile-speaker-mode.rules >/dev/null &&
+  grep -cF '/^omamobile-speaker-mode@(earpiece|speaker)\.service$/' polkit/50-omamobile-speaker-mode.rules >/dev/null ||
+  fail "polkit: only starting the two mode units"
+grep -c 'Requisite=omamobile-speaker-protection.service' 'systemd/omamobile-speaker-mode@.service' >/dev/null || fail "mode unit only with the service running"
+for d in 4 11; do
+  grep -c "api.alsa.pcm.device = \"$d\"" wireplumber/51-omamobile-aoc.conf >/dev/null || fail "WirePlumber hides PCM $d"
+done
+grep -c 'node.disabled = true' wireplumber/51-omamobile-aoc.conf >/dev/null || fail "WirePlumber disables the call PCMs"
+if grep -E "cset .*(PCM Volume|PCM Source|DSP|Analog|Digital)" ucm2/Google/cheetah/HiFi.conf ucm2/Google/tegu/HiFi.conf "$v"; then
   fail "UCM touches no amplifier control"
 fi
 pass "UCM finds the PCMs by id and leaves the amplifiers alone"
@@ -389,12 +413,78 @@ rc=0; prep=(OMAMOBILE_VERIFY_SECONDS=0.3); sp verify > "$r/v.out" 2>&1 || rc=$?;
 startok verify-swap; echo 'state: RUNNING' > "$r/asound/card0/pcm5p/sub0/status"; dspset Bottom CSPL_TEMPERATURE $((40 * 16384))
 rc=0; prep=(OMAMOBILE_VERIFY_SECONDS=0.3 OMAMOBILE_VERIFY_INTERVAL=0.1); sp verify > "$r/v.out" 2>&1 || rc=$?; prep=()
 ((rc == 1)) && grep -c 'differ' "$r/v.out" >/dev/null || { cat "$r/v.out" >&2; fail "verify refuses coil temperatures far apart"; }
-pass "verify: passes on a healthy playing pair, needs playback, catches swapped calibration"
+grep -cx 'checks basic' "$tmp/stamp" >/dev/null && grep -cx 'levels Top 657/6 Bottom 657/6' "$tmp/stamp" >/dev/null ||
+  { cat "$tmp/stamp" >&2; fail "verify: the stamp records basic checks and the levels"; }
+pass "verify: passes on a healthy playing pair, needs playback, catches swapped calibration; the stamp records the levels"
 
-c9() {  # name, then prep for the tree: param, stamp
+# --- verify --at-level: the gate for stage c9 (C9i) -----------------------------
+# One burst: the speaker PCM runs about 1.25 s while the fake coil warms by
+# tenths of a degree, then stops, and the coil cools (AFTER= temperatures).
+burstbg() {
+  ( settemp() { echo "$1" > "$r/temp.n"; mv "$r/temp.n" "$r/temp"; }
+    settemp 25.00; sleep 0.8; echo 'state: RUNNING' > "$r/asound/card0/pcm5p/sub0/status"
+    for c in ${DURING:-25.00 25.08 25.16 25.24 25.30}; do settemp "$c"; sleep 0.25; done
+    echo closed > "$r/asound/card0/pcm5p/sub0/status"
+    for c in ${AFTER:-25.20 25.12 25.06}; do settemp "$c"; sleep 0.25; done ) &
+}
+atlevel() {  # verify --at-level ARGS, fast, against a burst started just before
+  rc=0
+  prep=(FAKE_TEMP_FILE=$r/temp OMAMOBILE_VERIFY_BURST=0.9 OMAMOBILE_VERIFY_AFTER=0.7 OMAMOBILE_VERIFY_SETTLE=0.2
+        OMAMOBILE_VERIFY_INTERVAL=0.05 OMAMOBILE_VERIFY_Z_START=0.05 OMAMOBILE_VERIFY_Z_ROUNDS=3
+        OMAMOBILE_VERIFY_Z_INTERVAL=0.1 OMAMOBILE_VERIFY_WAIT=5 "${aprep[@]}")
+  sp verify --at-level "$@" > "$r/v.out" 2>&1 || rc=$?
+  prep=(); aprep=(); wait
+}
+aprep=()
+atstart() {  # name: a started tree whose firmware reports R_selected = CAL_R
+  startok "$1"
+  dspset Top CAL_R_SELECTED $((0x2000)); dspset Bottom CAL_R_SELECTED $((0x2100))
+}
+atstart atl; burstbg; atlevel 657 6 --room 25
+((rc == 0)) || { cat "$r/v.out" >&2; fail "verify --at-level passes on a sensing, tracking pair"; }
+grep -cx 'checks at-level' "$r/state/speaker-protection-verified" >/dev/null &&
+  grep -cx 'levels Top 657/6 Bottom 657/6' "$r/state/speaker-protection-verified" >/dev/null ||
+  { cat "$r/state/speaker-protection-verified" >&2; fail "verify --at-level: the stamp records the gate and the levels"; }
+grep -c 'Z/CAL_R 1.000 (3/3 valid)' "$r/v.out" >/dev/null && grep -c 'rise +0.30 C' "$r/v.out" >/dev/null ||
+  { cat "$r/v.out" >&2; fail "verify --at-level: prints Z/CAL_R and the rise"; }
+if grep -E '0x20|0x21|8192|8448' "$r/v.out"; then fail "verify --at-level prints no calibration value"; fi
+cp "$r/state/speaker-protection-verified" "$tmp/stamp-at"
+atrefused() {  # name, what the output must say
+  ((rc == 1)) && grep -c -- "$2" "$r/v.out" >/dev/null || { cat "$r/v.out" >&2; fail "verify --at-level refuses: $1"; }
+  [[ ! -e $r/state/speaker-protection-verified ]] || fail "verify --at-level: no stamp after a refusal ($1)"
+}
+atstart atl-vmon; dspset Top BDLOG_VMON_LOW_FLAG 1; burstbg; atlevel
+atrefused "vmon low 1 (open loop)" 'Top: vmon low 1 at'
+atstart atl-zlow; burstbg; aprep=(FAKE_Z_RATIO=low); atlevel
+atrefused "no valid impedance" 'Z/CAL_R valid in 0 of 3'
+atstart atl-zhigh; burstbg; aprep=(FAKE_Z_RATIO=1.1); atlevel
+atrefused "Z/CAL_R 1.10" 'Z/CAL_R 1.100 outside 0.97-1.05'
+atstart atl-static; burstbg; aprep=(FAKE_TEMP_FILE=$r/none); atlevel
+atrefused "a coil reading that sits still" 'does not move with the signal'
+atstart atl-climb; AFTER='25.40 25.50 25.60' burstbg; atlevel
+atrefused "a coil reading that keeps climbing" 'does not fall after the burst'
+atstart atl-hot; DURING='25.00 25.50 26.20 26.40 26.50' burstbg; atlevel
+atrefused "a rise of 1 C or more" 'not less than 1 C'
+atstart atl-room; burstbg; atlevel --room 30
+atrefused "a first reading far from the room" 'from the room'
+atstart atl-level; burstbg; atlevel 817 17
+atrefused "levels other than the ones asked for" 'not 817/17 on both'
+atstart atl-rsel; dspset Bottom CAL_R_SELECTED $((0x2000)); burstbg; atlevel
+atrefused "R_selected not CAL_R" 'Bottom: R_selected is not CAL_R'
+startok atl-wait; rc=0; prep=(OMAMOBILE_VERIFY_WAIT=0.3); sp verify --at-level > "$r/v.out" 2>&1 || rc=$?; prep=()
+atrefused "no burst" 'no speaker stream started'
+pass "verify --at-level: vmon low 0, Z/CAL_R 0.97-1.05, a rise below 1 C that falls after the burst, R_selected, the levels; the stamp records them"
+
+# --- stage c9 and c9-probe ----------------------------------------------------------
+mkstamp() {  # OUT CHECKS LEVELS: the test firmware's stamp with these lines
+  sed -e "s/^checks .*/checks $2/" -e "s|^levels .*|levels $3|" "$tmp/stamp" > "$1"
+}
+mkstamp "$tmp/stamp-817" at-level 'Top 817/17 Bottom 817/17'
+mkstamp "$tmp/stamp-737" at-level 'Top 737/10 Bottom 737/10'
+c9() {  # name, then prep for the tree: param, stamp file (default: at-level at 817/17)
   mktree "$1"
   [[ ${2:-} == noparam ]] || echo Y > "$r/module/aoc_alsa_dev/parameters/speaker_protection"
-  [[ ${3:-} == nostamp ]] || cp "$tmp/stamp" "$r/state/speaker-protection-verified"
+  [[ ${3:-} == nostamp ]] || cp "${3:-$tmp/stamp-817}" "$r/state/speaker-protection-verified"
   rc=0
   prep=(OMAMOBILE_SPK_STAGE=c9 OMAMOBILE_SPK_DIGITAL=817 OMAMOBILE_SPK_ANALOG=17 FAKE_ANALOG_MAX=17 "${c9prep[@]}")
   sp start > "$r/out" 2>&1 || rc=$?
@@ -405,13 +495,101 @@ c9 c9-ok
 ((rc == 0)) && [[ $(val "Top Digital PCM Volume") == 817 && $(val "Bottom Analog PCM Volume") == 17 ]] || { cat "$r/out" >&2; fail "stage c9 at stock levels"; }
 c9 c9-noparam noparam; check_refused_early "c9 without speaker_protection=1"
 c9 c9-nostamp '' nostamp; check_refused_early "c9 without a stamp"
+c9 c9-basic '' "$tmp/stamp"; check_refused_early "c9 with a stamp from the basic verify"
+grep -c "verify --at-level" "$r/out" >/dev/null || fail "c9 says which verification it needs"
+c9 c9-above '' "$tmp/stamp-737"; check_refused_early "c9 above the stamp's levels"
+c9prep=(OMAMOBILE_SPK_DIGITAL=737 OMAMOBILE_SPK_ANALOG=10); c9 c9-at '' "$tmp/stamp-737"
+((rc == 0)) && [[ $(val "Top Digital PCM Volume") == 737 ]] || { cat "$r/out" >&2; fail "c9 at the stamp's levels"; }
+c9prep=(OMAMOBILE_SPK_TOP_ANALOG=11 OMAMOBILE_SPK_DIGITAL=737 OMAMOBILE_SPK_ANALOG=10); c9 c9-above-top '' "$tmp/stamp-737"
+check_refused_early "c9: one amplifier above the stamp's level"
 mktree tmpfw; c9prep=(OMAMOBILE_FW_DIRS=$tmp/otherfw); mkdir -p "$tmp/otherfw/cirrus"
 for f in "$r"/fw/cirrus/*; do echo changed > "$tmp/otherfw/cirrus/${f##*/}"; done
 c9 c9-otherfw; check_refused_early "c9 with a stamp for other firmware"
+c9prep=(OMAMOBILE_SPK_STAGE=c9-probe); c9 c9-probe '' "$tmp/stamp"
+((rc == 0)) && [[ $(val "Bottom Analog PCM Volume") == 17 ]] || { cat "$r/out" >&2; fail "c9-probe at 817/17 with a basic stamp"; }
+c9prep=(OMAMOBILE_SPK_STAGE=c9-probe); c9 c9-probe-noparam noparam "$tmp/stamp"; check_refused_early "c9-probe without speaker_protection=1"
+c9prep=(OMAMOBILE_SPK_STAGE=c9-probe); c9 c9-probe-nostamp '' nostamp; check_refused_early "c9-probe without a stamp"
 prep=(OMAMOBILE_SPK_ANALOG=11); mktree c8-param; echo Y > "$r/module/aoc_alsa_dev/parameters/speaker_protection"
 rc=0; prep=(OMAMOBILE_SPK_ANALOG=11 FAKE_ANALOG_MAX=17); sp start > "$r/out" 2>&1 || rc=$?; prep=()
 check_refused_early "c8 keeps analog at 10 even with speaker_protection=1"
-pass "stage c9: stock levels only with speaker_protection=1 and a stamp for this firmware"
+# the watchdog in c9 holds the stamp's levels too
+c9prep=(OMAMOBILE_SPK_DIGITAL=737 OMAMOBILE_SPK_ANALOG=10); c9 c9-watch '' "$tmp/stamp-737"
+amx cset "name=Bottom Digital PCM Volume" 817 >/dev/null; wprep=(OMAMOBILE_SPK_STAGE=c9 FAKE_ANALOG_MAX=17); watchrun
+((rc == 1)) && muted || { cat "$r/watch.out" >&2; fail "watchdog: in c9, a level above the stamp's mutes"; }
+pass "stage c9: only with speaker_protection=1 and a verify --at-level stamp for this firmware, at its levels at most; c9-probe with any stamp"
+
+# --- earpiece mode (O6) ---------------------------------------------------------
+ear() { rc=0; sp mode "$@" > "$r/m.out" 2>&1 || rc=$?; prep=(); }
+startok ear; ear earpiece
+((rc == 0)) || { cat "$r/m.out" >&2; fail "mode earpiece"; }
+[[ $(val "Top PCM Source") == 0 && $(val "Top Analog PCM Volume") == 6 && $(val "Top Digital PCM Volume") == 657 &&
+   $(val "Bottom Digital PCM Volume") == 0 && $(val "Bottom PCM Source") == 1 ]] || fail "earpiece: top ASP at 657/6, bottom muted"
+[[ $(cat "$r/run/speaker-mode") == earpiece && $(cat "$r/run/speaker-protection") == "ok: stage c8, mode earpiece"* ]] || fail "earpiece: mode and status"
+# the order: mute both, lower the top, then bypass its DSP, then unmute it alone
+[[ $(tail -n5 "$r/cset.log" | cut -d= -f1 | tr '\n' ',') == "Top Digital PCM Volume,Bottom Digital PCM Volume,Top Analog PCM Volume,Top PCM Source,Top Digital PCM Volume," ]] ||
+  { tail -n5 "$r/cset.log" >&2; fail "earpiece: mute, analog, ASP, then unmute the top"; }
+watchrun
+((rc == 0)) && ! muted || { cat "$r/watch.out" >&2; fail "watchdog: earpiece mode, idle, nothing happens"; }
+echo 'state: RUNNING' > "$r/asound/card0/pcm5p/sub0/status"; watchrun
+((rc == 0)) && ! muted || { cat "$r/watch.out" >&2; fail "watchdog: earpiece mode, playing, nothing happens"; }
+ear speaker
+((rc == 0)) || { cat "$r/m.out" >&2; fail "mode speaker"; }
+[[ $(val "Top PCM Source") == 1 && $(val "Top Analog PCM Volume") == 6 && $(val "Top Digital PCM Volume") == 657 &&
+   $(val "Bottom Digital PCM Volume") == 657 && ! -e $r/run/speaker-mode && $(cat "$r/run/speaker-protection") == "ok: stage c8, protection"* ]] ||
+  fail "speaker: both through the DSP at the stage's levels again"
+prep=(OMAMOBILE_SPK_STAGE=); run ear-media; ((rc == 0)) || fail "ear-media: start"
+prep=(OMAMOBILE_SPK_STAGE=); ear earpiece
+((rc == 0)) && [[ $(val "Top Analog PCM Volume") == 6 && $(val "Bottom Analog PCM Volume") == 10 ]] || { cat "$r/m.out" >&2; fail "earpiece in stage media: top analog 6"; }
+prep=(OMAMOBILE_SPK_STAGE=); ear speaker
+((rc == 0)) && [[ $(val "Top Analog PCM Volume") == 10 && $(val "Top Digital PCM Volume") == 737 ]] || fail "speaker in stage media: 737/10 again"
+pass "earpiece mode: the top amplifier alone, DSP bypassed, at 657/6, the bottom muted; the watchdog accepts it; speaker mode restores the stage"
+
+startok ear-a7; prep=(OMAMOBILE_SPK_EARPIECE_ANALOG=7); ear earpiece
+((rc == 1)) && muted && [[ $(cat "$r/run/speaker-protection") == muted:* && ! -e $r/run/speaker-mode ]] || { cat "$r/m.out" >&2; fail "earpiece analog 7 refused, muted"; }
+prep=(OMAMOBILE_SPK_STAGE=); run ear-d738; prep=(OMAMOBILE_SPK_STAGE= OMAMOBILE_SPK_EARPIECE_DIGITAL=738); ear earpiece
+((rc == 1)) && muted || fail "earpiece digital 738 refused in stage media"
+startok ear-d700; prep=(OMAMOBILE_SPK_EARPIECE_DIGITAL=700); ear earpiece
+((rc == 1)) && muted || fail "earpiece digital above the c8 stage's 657 refused"
+mktree ear-off; echo 'muted: by request' > "$r/run/speaker-protection"; ear earpiece
+((rc == 1)) && [[ ! -e $r/run/speaker-mode ]] || fail "earpiece refused when protection isn't running"
+startok ear-bad; ear loud; ((rc == 2)) || fail "an unknown mode is refused"
+startok ear-start; ear earpiece; sp start > "$r/out" 2>&1 || { cat "$r/out" >&2; fail "ear-start: start again"; }
+[[ ! -e $r/run/speaker-mode && $(val "Top PCM Source") == 1 ]] || fail "start returns to speaker mode"
+startok ear-wbottom; ear earpiece; amx cset "name=Bottom Digital PCM Volume" 100 >/dev/null; watchrun
+((rc == 1)) && grep -c 'earpiece mode, not muted' "$r/run/speaker-protection" >/dev/null || { cat "$r/watch.out" >&2; fail "watchdog: earpiece mode with the bottom unmuted mutes"; }
+startok ear-wtop; ear earpiece; amx cset "name=Top Analog PCM Volume" 7 >/dev/null; watchrun
+((rc == 1)) && muted || fail "watchdog: earpiece mode with the top above analog 6 mutes"
+startok ear-wd; ear earpiece; amx cset "name=Top Digital PCM Volume" 738 >/dev/null; wprep=(OMAMOBILE_SPK_STAGE=); watchrun
+((rc == 1)) && muted || fail "watchdog: earpiece mode with the top above digital 737 mutes (stage media)"
+startok ear-wasp; amx cset "name=Top PCM Source" ASP >/dev/null; watchrun
+((rc == 1)) && muted || fail "watchdog: the top bypassed outside earpiece mode mutes"
+startok ear-wunknown; echo loud > "$r/run/speaker-mode"; watchrun
+((rc == 1)) && muted && grep -c "unknown speaker mode" "$r/run/speaker-protection" >/dev/null || fail "watchdog: an unknown mode mutes"
+startok ear-verify; ear earpiece; echo 'state: RUNNING' > "$r/asound/card0/pcm5p/sub0/status"
+rc=0; prep=(OMAMOBILE_VERIFY_SECONDS=0.3); sp verify > "$r/v.out" 2>&1 || rc=$?; prep=()
+((rc == 1)) && grep -c 'earpiece mode' "$r/v.out" >/dev/null || fail "verify refuses in earpiece mode"
+pass "earpiece mode: refuses analog above 6 and digital above 737 or the stage's; watchdog mutes on an unmuted bottom, a louder top, a bypass outside the mode"
+
+# --- report (O1) -------------------------------------------------------------------
+r=$tmp/run.ok
+mkdir -p "$r/modprobe.d"
+echo 'options aoc_alsa_dev speaker_protection=1' > "$r/modprobe.d/omamobile-audio-c9-bringup.conf"
+printf '# a comment\nOMAMOBILE_SPK_TEMP_JUMP=5\n' > "$r/speaker.conf"
+out=$(prep=(OMAMOBILE_MODPROBE_D=$r/modprobe.d OMAMOBILE_SPK_CONF=$r/speaker.conf OMAMOBILE_PW_CONF_D=$r/pw
+            OMAMOBILE_HOMES=$r/home OMAMOBILE_REPORT_SESSION=0); sp report 2>&1) || { echo "$out" >&2; fail "report runs"; }
+for want in "stage: c8 (ceilings: digital 657, analog top 6, bottom 10; earpiece 657/6)" "levels configured: Top 657/6, Bottom 657/6" \
+            "  OMAMOBILE_SPK_TEMP_JUMP=5" "service: ok: stage c8" "mode: speaker" "stamp: none" "speaker_protection: N" \
+            "modprobe.d: omamobile-audio-c9-bringup.conf (the c9 bring-up file" "firmware: protection firmware and both tunings installed" \
+            "speaker filter: not installed" "speaker PCM (pcm5p): closed" "TX slots ok" "== status" "calibration in the DSP vs persist: match"; do
+  [[ $out == *"$want"* ]] || { echo "$out" >&2; fail "report: $want"; }
+done
+if grep -E '0x20|0x21|8192|8448' <<<"$out"; then fail "report prints no calibration value"; fi
+[[ $(val "Top Digital PCM Volume") == 657 ]] || fail "report changes nothing"
+r=$tmp/run.atl
+out=$(prep=(OMAMOBILE_REPORT_SESSION=0 OMAMOBILE_MODPROBE_D=$r/none); sp report 2>&1)
+[[ $out == *"checks at-level, levels Top 657/6 Bottom 657/6"* && $out == *"stage c9 allowed by the stamp: yes, up to Top 657/6 Bottom 657/6"* ]] ||
+  { echo "$out" >&2; fail "report: the stamp's gate and levels"; }
+pass "report: kernel, stage, levels, settings, stamp, speaker_protection, bring-up files, firmware, mode, the PCM, TX slots, then status; read-only, no calibration values"
 
 # status, health and mute
 r=$tmp/run.ok
@@ -645,6 +823,8 @@ for f in usr/bin/omamobile-speaker-protection usr/lib/systemd/system/omamobile-s
          usr/lib/udev/rules.d/70-omamobile-cs35l41.rules \
          usr/lib/modprobe.d/omamobile-audio.conf etc/omamobile/speaker.conf \
          usr/share/alsa/ucm2/conf.d/aoc-snd-card/aoc-snd-card.conf usr/share/alsa/ucm2/Google/cheetah/HiFi.conf \
+         usr/share/alsa/ucm2/Google/cheetah/VoiceCall.conf usr/lib/systemd/system/omamobile-speaker-mode@.service \
+         usr/share/polkit-1/rules.d/50-omamobile-speaker-mode.rules \
          usr/share/wireplumber/wireplumber.conf.d/51-omamobile-aoc.conf \
          usr/share/alsa/ucm2/conf.d/aoc-snd-card/google,tegu-aoc-snd-card.conf usr/share/alsa/ucm2/Google/tegu/HiFi.conf \
          usr/share/wireplumber/wireplumber.conf.d/52-omamobile-tegu-aoc.conf \

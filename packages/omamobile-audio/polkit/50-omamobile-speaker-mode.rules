@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: MIT
+// The "Voice Call" UCM verb's Earpiece and Speaker devices: let the active
+// local user start omamobile-speaker-mode@earpiece|speaker.service, which
+// runs "omamobile-speaker-protection mode <mode>" as root. Neither raises a
+// level: earpiece mode lowers the top amplifier to the earpiece's ceilings
+// and mutes the bottom one; speaker mode returns to the stage's levels.
+// Nothing else.
+polkit.addRule(function(action, subject) {
+  if (action.id == "org.freedesktop.systemd1.manage-units" &&
+      subject.local && subject.active &&
+      /^omamobile-speaker-mode@(earpiece|speaker)\.service$/.test(action.lookup("unit")) &&
+      action.lookup("verb") == "start") {
+    return polkit.Result.YES;
+  }
+});

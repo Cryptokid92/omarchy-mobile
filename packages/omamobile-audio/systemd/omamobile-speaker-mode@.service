@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+# The speaker amplifiers' mode, for the "Voice Call" UCM verb:
+#   omamobile-speaker-mode@earpiece.service   the top amplifier alone, DSP
+#                                             bypassed, analog <= 6, digital
+#                                             <= 737; the bottom one muted
+#   omamobile-speaker-mode@speaker.service    both through their DSPs at the
+#                                             stage's levels (the default)
+# Only while the protection service runs (Requisite); the script refuses any
+# other instance and any level above the earpiece's ceilings, and the
+# watchdog mutes on anything the mode doesn't allow. The polkit rule
+# 50-omamobile-speaker-mode.rules lets the active local user start these two
+# instances, nothing else. Not enabled: started on request only.
+[Unit]
+Description=Speaker amplifiers: %i mode
+Requisite=omamobile-speaker-protection.service
+After=omamobile-speaker-protection.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/omamobile/speaker.conf
+ExecStart=/usr/bin/omamobile-speaker-protection mode %i
+TimeoutStartSec=20

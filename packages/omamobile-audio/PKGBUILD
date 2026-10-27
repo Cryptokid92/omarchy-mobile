@@ -7,7 +7,7 @@ pkgdesc="Omarchy Mobile audio for the Pixel 7 Pro and Pixel 9a: UCM profiles and
 arch=(any)
 url="https://github.com/derekross/omarchy-mobile"
 license=(MIT)
-depends=(bash coreutils kmod python alsa-lib alsa-utils alsa-ucm-conf e2fsprogs glib2 pipewire wireplumber swh-plugins)
+depends=(bash coreutils util-linux kmod python alsa-lib alsa-utils alsa-ucm-conf e2fsprogs glib2 pipewire wireplumber swh-plugins)
 backup=(etc/omamobile/speaker.conf)
 
 check() {
