@@ -1,8 +1,13 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Suspend plan: s2idle first, then SYS_SLEEP (cheetah / gs201)
 
-Status (2026-10-26): **tier 1 userspace written offline, not yet on the
-phone.** The kernel side of s2idle is done (S0-S7 below; last tested on
+Status (2026-10-26): **tier 1 userspace on the phone; P0-P3 passed, and
+P5 is stopped on a speaker finding.** Auto-sleep works: Power sleeps and
+wakes, there is no lock flash, the fingerprint works after a wake, Wi-Fi
+stays up, and alarms wake the phone; 13 cycles, 0 failures. But the first
+sound after the sleeps found the bottom CS35L41 with a false coil
+temperature, which only a power-off cleared (NOTES 2026-10-26). **The
+toggle stays off until the amplifiers resume cleanly.** The kernel side of s2idle is done (S0-S7 below; last tested on
 7.3.0-rc6-omamobile-push1-00558-gcbd727f42785, `omamobile-int` @
 `cbd727f42`). Branch `suspend-tier1` in this repository adds:
 - `omamobile-sleepd` (omamobile-shell 0.2.29): sleep once the screen has
@@ -1469,6 +1474,27 @@ and run each test; between tests, read the watcher's journal
 - **Rollback:** `runuser -u "$(id -nu 1000)" -- omarchy-toggle omamobile-sleep off` as root
   (takes effect at the next poll, no restart); if the package is at fault,
   the previous `omamobile-shell` from the pacman cache.
+
+**P5 results (2026-10-26, same kernel, shell 0.2.29 and device-cheetah 0.1.34):**
+
+- **The watcher:** started, refused with the toggle off, and slept with
+  it on: "sleeping (power key)" about 2 s after Power, and "sleeping
+  (screen off and locked for 30 s)".
+- **Test a failed at first.** The waking Power press never reached
+  Hyprland, so the phone woke with the screen dark. This is fixed in the
+  shell (`omamobile-sleepd` → `omamobile-keys wake` on a `KEY_POWER`
+  wake), and the retest passed: the PIN pad and the fingerprint came
+  straight back.
+- **Stopped before tests b-i.** The first sound after the sleeps tripped
+  the speaker watchdog: the bottom CS35L41 read a false coil temperature
+  (NOTES 2026-10-26). Only a full power-off cleared it.
+- **The toggle is off on the phone.** P5 resumes only when the
+  amplifiers have a resume path that keeps their protection state, and a
+  sleep with playback before and after it passes in a test with a
+  listener.
+- **New stop condition for P5 and later:** the speaker watchdog trips,
+  or `omamobile-speaker-protection status` shows a temperature away from
+  about 25 °C while silent after a resume.
 
 #### P6: a day of use with the toggle on (risk: medium, perception; human)
 
