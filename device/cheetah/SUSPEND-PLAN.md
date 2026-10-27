@@ -1393,6 +1393,15 @@ tools/phone-ssh --fresh 'journalctl -b -o cat | grep -E "omamobile-sleep|PM: sus
   once on a lock bypass.
 - **Rollback:** none.
 
+**Results so far (2026-10-26, `7.3.0-rc6-omamobile-push1-00588-gcd72ae58ee47`):**
+
+- **P0:** passed: `[s2idle] deep`, `spm_lvl` 5, hook and keep flag present, rtc0 with alarmtimer.
+- **P1:** passed. The phone slept 40 s and the RTC woke it (`s2mpg12-pmic`). The D3 ACK came by control message after 13.6 ms, Wi-Fi stayed connected, and there were no UFS lines.
+- **P3:** passed ("fired 1 s after it was due").
+- **Two bugs turned up before P2 ran:**
+  - **The lock's fingerprint broke after P3.** The freeze cut the lock's fingerprint cancel short: the bridge sent ERROR 5, but its READY never reached libfprint, and fprintd answered every later claim with "device still busy". The lock then retried about three times a second (AUTHINFO_UNAVAIL) and never showed the sensor. A restart of fprintd cleared it. **Fix:** the sleep hook now try-restarts fprintd on every resume (device-cheetah 0.1.34).
+  - **Locking with Power flashed the PIN pad, a bug in `omamobile-keys`, not in suspend.** `power-up` cleared the press marker only after `short_press` returned. Locking takes about 0.9 s, longer than the 0.6 s long-press timer, so the timer took the press for a hold and woke the lock it had just taken. A backlight trace showed it: brightness 0 → 819 for 0.3 s, then off. **Fix:** `power-up` forgets the press first; test/keys.sh has a slow-lock case (omamobile-shell 0.2.29).
+
 #### P3: an alarm wakes the phone (risk: low; announce: the phone sleeps about 2 minutes)
 
 ```sh
