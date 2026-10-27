@@ -66,10 +66,18 @@ for tool in omarchy-brightness-display omarchy-system-lock omarchy-shell brightn
   cat >"$t/bin/$tool" <<STUB
 #!/bin/bash
 [[ "$tool \$*" == "omarchy-shell lock isLocked" ]] && { cat "$t/locked"; exit 0; }
+[[ "$tool \$*" == "omarchy-shell lock status" ]] && { printf '{"locked":true,"secure":%s}\n' "\$(cat "$t/secure")"; exit 0; }
 echo "$tool \$*" >>"$log"
 STUB
 done
 chmod +x "$t"/bin/*
+# omamobile-sleepd decides itself (toggle, inhibitors); the key only asks.
+cat >"$t/bin/omamobile-sleepd" <<STUB
+#!/bin/bash
+echo "omamobile-sleepd \$*" >>"$log"
+STUB
+chmod +x "$t"/bin/*
+echo true >"$t/secure"
 echo foot >"$t/class"
 press() { reset; keys power-down; keys power-up; sleep 0.5; }
 
@@ -93,3 +101,24 @@ STUB
 echo false >"$t/locked"
 press; grep -q "omarchy-system-lock" "$log" || fail "an unanswered screen state reads as lit: the press locks"
 echo "ok - power key: lock, screen off, and wake by lock and screen state"
+
+# Sleep now (SUSPEND-PLAN 6.1): only after a press that turned the screen
+# off behind a secure lock; never after a wake or with the lock not secure.
+cat >"$t/bin/hyprctl" <<STUB
+#!/bin/bash
+if [[ \$1 == monitors ]]; then printf '[{"dpmsStatus": %s}]\n' "\$(cat "$t/dpms")"; exit 0; fi
+printf '{"class": "%s"}\n' "\$(cat "$t/class")"
+STUB
+echo true >"$t/secure"
+echo false >"$t/locked"; echo true >"$t/dpms"
+press; grep -c "omamobile-sleepd now" "$log" >/dev/null || fail "unlocked and lit: the press that locks asks for sleep"
+echo true >"$t/locked"; echo true >"$t/dpms"
+press; grep -c "omamobile-sleepd now" "$log" >/dev/null || fail "locked and lit: the press that turns the screen off asks for sleep"
+echo true >"$t/locked"; echo false >"$t/dpms"
+press; grep -c "omamobile-sleepd" "$log" >/dev/null && fail "locked and dark: a wake never asks for sleep"
+echo false >"$t/locked"; echo false >"$t/dpms"
+press; grep -c "omamobile-sleepd" "$log" >/dev/null && fail "unlocked and dark: lighting the screen never asks for sleep"
+echo false >"$t/secure"
+echo true >"$t/locked"; echo true >"$t/dpms"
+press; grep -c "omamobile-sleepd" "$log" >/dev/null && fail "a lock that isn't secure never asks for sleep"
+echo "ok - power key: screen off behind a secure lock asks omamobile-sleepd to sleep now"
