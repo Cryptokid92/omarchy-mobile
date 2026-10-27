@@ -13,6 +13,8 @@
 #   power, held 0.6 s  unlocked: Omarchy's system menu, while still held
 #                      locked: screen on
 #   power + volume down together: screenshot (Omarchy's, full screen)
+#   wake                omamobile-sleepd, after Power woke the phone from
+#                       sleep: the PIN pad, as the lost press would have
 #   volume down alone   lowers the volume after a 0.15 s wait for power
 #   volume up           raises the volume
 #   either volume key while the Camera app (omacam) is in front and the phone
@@ -132,6 +134,9 @@ short_press() {
   now=$(date +%s%3N); last=$(cat "$state/last-press" 2>/dev/null || echo 0)
   echo "$now" >"$state/last-press"
   (( now - last < 800 )) && return 0
+  # The press that woke the phone from sleep, if it gets here at all:
+  # omamobile-sleepd has lit the PIN pad for it already.
+  [[ -f $state/power-wake ]] && (( now - $(<"$state/power-wake") < 1500 )) && return 0
   if screensaver_up; then
     omarchy-system-lock
   elif locked; then
@@ -242,8 +247,14 @@ case "${1:-}" in
       short_press
     fi
     ;;
+  wake)
+    # omamobile-sleepd after a power-key wake from sleep: Hyprland never sees
+    # the press that woke the phone, so light the PIN pad as that press would.
+    now >"$state/power-wake"
+    if locked && screen_off; then wake_locked; fi
+    ;;
   *)
-    echo "Usage: omamobile-keys power-down|power-up|volume-down|volume-up" >&2
+    echo "Usage: omamobile-keys power-down|power-up|volume-down|volume-up|wake" >&2
     exit 1
     ;;
 esac

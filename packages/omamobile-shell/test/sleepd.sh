@@ -24,11 +24,12 @@ fake omarchy-shell '[[ "$*" == "lock status" ]] && printf "{\"locked\":true,\"se
 fake ss 'cat "$T/ssh"'
 fake busctl 'printf "{\"type\":\"a(ssssuu)\",\"data\":[[%s]]}\n" "$(cat "$T/inhibitors")"'
 fake pactl 'cat "$T/sinks"'
+fake omamobile-keys 'echo "omamobile-keys $* at $(cat "$T/clock")" >>"$T/log"'
 fake systemctl 'echo "systemctl $* at $(cat "$T/clock")" >>"$T/log"
 case "$*" in
   suspend)
     echo $(( $(cat "$T/sys/power/suspend_stats/success") + 1 )) >"$T/sys/power/suspend_stats/success"
-    echo 145 >"$T/sys/power/pm_wakeup_irq"
+    cat "$T/wake_irq" 2>/dev/null >"$T/sys/power/pm_wakeup_irq" || echo 145 >"$T/sys/power/pm_wakeup_irq"
     echo $(( $(cat "$T/clock") + 600 )) >"$T/clock"
     [[ -f $T/on_resume ]] && bash "$T/on_resume"
     exit 0 ;;
@@ -43,7 +44,8 @@ reset() {
   printf '50\talsa_output.aoc\tPipeWire\ts16le 2ch 48000Hz\tSUSPENDED\n' >"$t/sinks"
   echo 0 >"$t/sys/power/suspend_stats/success"; echo 0 >"$t/sys/power/suspend_stats/fail"
   printf ' 145:          3          0  s2mpg12-pmic   0 Edge      rtc-alarm0\n' >"$t/proc/interrupts"
-  rm -f "$t/sys/power/pm_wakeup_irq" "$t/on_resume" "$t/now_at" "$t/off_at" "$t/active" "$t/home/.local/state/omarchy/indicators/stay-awake"
+  printf ' 111:         76          1  gpa10   0 Edge      KEY_POWER\n' >>"$t/proc/interrupts"
+  rm -f "$t/wake_irq" "$t/sys/power/pm_wakeup_irq" "$t/on_resume" "$t/now_at" "$t/off_at" "$t/active" "$t/home/.local/state/omarchy/indicators/stay-awake"
 }
 # Watch until the fake clock reaches 1000 + $1.
 watch() {
@@ -113,6 +115,11 @@ grep -c 'sleeping (dark resume, 5 s grace)' "$t/out" >/dev/null || fail "the sec
 # A power-key wake lights the screen: no sleep after it.
 reset; printf 'echo 0 >"%s"; echo true >"%s"\n' "$t/sys/class/backlight/panel/bl_power" "$t/dpms" >"$t/on_resume"; watch 700
 [[ $(suspends) == 1 ]] || fail "a wake that lit the screen stays awake"
+grep -c '^omamobile-keys' "$t/log" >/dev/null && fail "an RTC wake doesn't light the screen"
+# Power woke it: Hyprland never sees that press, so sleepd lights the PIN pad.
+reset; echo 111 >"$t/wake_irq"; printf 'echo 0 >"%s"; echo true >"%s"\n' "$t/sys/class/backlight/panel/bl_power" "$t/dpms" >"$t/on_resume"; watch 700
+grep -c '^omamobile-keys wake' "$t/log" >/dev/null || fail "a power-key wake asks omamobile-keys to light the PIN pad"
+grep -c 'a power-key wake: lighting the lock screen' "$t/out" >/dev/null || fail "the power-key wake is logged"
 # A failed suspend is logged and retried no sooner than 30 s later.
 reset
 fake systemctl 'echo "systemctl $* at $(cat "$T/clock")" >>"$T/log"

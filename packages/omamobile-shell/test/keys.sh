@@ -122,7 +122,17 @@ press; sleep 0.6
 grep -q "omarchy-system-lock" "$log" || fail "slow lock: the press locks"
 grep -q "lock wake\|brightness-display on\|omarchy-menu" "$log" && fail "slow lock: the long-press timer doesn't wake the lock it just took"
 mv "$t/bin/omarchy-system-lock.fast" "$t/bin/omarchy-system-lock"
-echo "ok - power key: a slow lock stays a short press"
+# After a power-key wake from sleep, sleepd lights the PIN pad; the waking
+# press, if Hyprland delivers it late, must not turn the screen back off.
+echo true >"$t/locked"; echo false >"$t/dpms"
+reset; keys wake
+grep -q "omarchy-shell lock wake" "$log" || fail "wake: a dark locked phone lights the PIN pad"
+echo true >"$t/dpms"; : >"$log"; keys power-down; keys power-up; sleep 0.5
+grep -q "omarchy-brightness-display off" "$log" && fail "the press that woke the phone doesn't turn the screen off again"
+echo true >"$t/locked"; echo true >"$t/dpms"
+reset; keys wake
+grep -q "lock wake" "$log" && fail "wake: a lit screen is left alone"
+echo "ok - power key: a slow lock stays a short press, and the press that woke the phone is the wake"
 
 # Sleep now (SUSPEND-PLAN 6.1): only after a press that turned the screen
 # off behind a secure lock; never after a wake or with the lock not secure.
