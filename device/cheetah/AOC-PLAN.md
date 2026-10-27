@@ -1,6 +1,22 @@
 <!-- SPDX-License-Identifier: MIT -->
 # AoC plan (cheetah / gs201): audio and sensor DSP bring-up
 
+Status (2026-10-26, offline; nothing run on the phone): **omamobile-audio
+0.6.0 is built and tested against the fakes, not installed** (C9i below):
+a read-only `report`, the stronger stage c9 gate (`verify --at-level`:
+vmon low 0, Z/CAL_R 0.97-1.05, a coil rise below 1 °C that falls after the
+burst; c9 only at the stamp's levels, `c9-probe` for research bursts), an
+earpiece mode in the service and the watchdog (top amplifier alone, DSP
+bypassed, ≤ 737/6; bottom muted), a "Voice Call" UCM verb that is never the
+default, and two laptop tools: `tools/aoc-amp-diag MODE=snapshot` / `diff`
+(a bounded register snapshot) and `tools/speaker-gain17-probe` (G0-G4 as
+one attended session). Defaults unchanged: stage media, 737/10. Which
+omamobile-audio the phone runs isn't recorded (0.3.5 on 2026-10-13; 0.4.1
+and 0.5.x were never recorded as installed), so **next is C9i session 1:
+R0 (read-only) first, then 0.6.0 and C9h's listening steps at 737/10**;
+the gain-17 steps (G0-G6) are a separate session with their own go, and
+the stock capture (C9j) a third, only if G gives no lead.
+
 Status (2026-10-13): **the AoC starts at every boot and serves audio and
 sensors.** On the phone: C1-C4a, C4t (the start through Trusty), C5 (core,
 IPC and character devices), C6 (sensors at every boot, auto-rotate), C7 (the
@@ -1902,6 +1918,158 @@ merges cleanly into int; `make modules dtbs` passes in `out-aoc`):
      delta on, and `options aoc_alsa_dev speaker_protection=1` in its
      modprobe file; delete `/etc/modprobe.d/omamobile-audio-c9-bringup.conf`
      and the test lines in `/etc/omamobile/speaker.conf`.
+
+   **C9i: omamobile-audio 0.6.0 and the next sessions (2026-10-26,
+   offline; nothing ran on the phone).** What 0.6.0 adds, all tested
+   against `test/fake-amixer` (no phone):
+   - **`omamobile-speaker-protection report`** (read-only): kernel,
+     packages, stage and its ceilings, the configured levels, the settings
+     in `/etc/omamobile/speaker.conf`, the service's status, the mode, both
+     units, the stamp (date, kernel, firmware match, checks, levels, and
+     what it allows), `speaker_protection`, the omamobile files in
+     `/etc/modprobe.d` (the c9 bring-up file by name), firmware and media
+     deltas, the filter (installed, a user's saved copy, in the path), the
+     speaker PCM's state and `hw_params`, the TX slots, then `status`. It
+     prints no calibration value and no account name: its output can go
+     into this plan.
+   - **The stronger c9 gate.** `verify --at-level [DIGITAL ANALOG]
+     [--room C]`, started before a short burst (`--burst`, default 5 s),
+     samples both amplifiers from the burst's start to 4 s after it and
+     requires, besides the basic checks: `BDLOG_VMON_LOW_FLAG` 0 in every
+     sample from 1.5 s to the end of the burst; the firmware's own
+     Z/CAL_R (RTLOG, as `impedance`) valid in at least half of 5 samples,
+     median 0.97-1.05; a coil rise of 0.02 °C or more and below 1 °C,
+     peaking no later than 1 s after the burst and falling by a quarter of
+     the rise by the end; R_selected = CAL_R; the over-counts unchanged;
+     the levels steady (and, if given, equal to DIGITAL/ANALOG on both);
+     with `--room`, the first reading within 1 °C of it. The stamp now
+     records `checks basic|at-level` and `levels Top D/A Bottom D/A`.
+     **Stage c9 needs an at-level stamp and refuses any level above its
+     levels** (the watchdog's c9 ceilings are the stamp's too). The old
+     c9 gate is now stage **`c9-probe`** (817/17 ceilings, any stamp for
+     this firmware, `speaker_protection=1`), for C9d's research bursts:
+     the runbooks above that use `lvl 817 17` (stage c9 by default) need
+     `lvl 817 17 c9-probe` from 0.6.0 on. The stamp on the phone (C9a,
+     2026-10-12) has no `checks` line, so after 0.6.0 it unlocks c9-probe
+     only. An assumption to check in G6: that `BDLOG_VMON_LOW_FLAG` reads
+     live, not latched since the firmware load; if it stays 1 at gain 10
+     after a burst at a level where it read 0, the gate needs a reset point.
+   - **`tools/aoc-amp-diag MODE=snapshot`** (read-only, plays nothing,
+     sets nothing): every CS35L41 register below 0x10100 of both
+     amplifiers, one register per read at its own offset in the regmap
+     file (python3's `pread`, or `dd` on stock), so the read stops at the
+     first register above 0x10100 and never reaches the DSP memories.
+     The bounded `awk` used so far stops formatting at 0x10100, but its
+     input buffer can make the kernel format up to about 4 KiB of
+     registers past it. Waits for a running speaker PCM, then `DELAY`
+     (0.3 s). **`tools/aoc-amp-diag diff A B`** on the laptop: the
+     registers that differ, by mainline name, `AMP_GAIN_CTRL` left out,
+     status registers marked.
+   - **`tools/speaker-gain17-probe`** (laptop): G0-G4 below as one
+     attended session. It saves the phone's `speaker.conf` and restores
+     it at the end (also on a stop or Ctrl-C), waits for Enter before
+     every sound, and prints the matching row of the C9d-8 table.
+   - **Earpiece mode** (the "Earpiece and calls" design below, without the
+     proximity mute): `omamobile-speaker-protection mode earpiece` mutes
+     both amplifiers, sets the top's analog gain, records the mode in
+     `/run/omamobile/speaker-mode`, sets the top's PCM Source to ASP and
+     unmutes it alone. Defaults 657/6, ceilings 737/6 in every stage (the
+     c8 stage's 657); the bottom stays at digital 0. `mode speaker` goes
+     back: both through the DSP at the stage's levels, the limits checked
+     again. A start always ends in speaker mode. The watchdog reads the
+     mode each round (twice, so a change mid-read is checked next round):
+     in earpiece mode it allows ASP on the top amplifier only, at 737/6 or
+     less, and mutes if the bottom one isn't at 0; `verify` refuses in
+     earpiece mode. `omamobile-speaker-mode@earpiece|speaker.service`
+     (oneshot, `Requisite=` the protection service) runs it, and a polkit
+     rule lets the active local user start those two instances. The
+     status line in earpiece mode still starts `ok: stage <stage>,`, so
+     omamobile-sitd's call audio check (top analog ≤ 6, bottom ≤ 10, both
+     digital ≤ 737) passes in earpiece mode and still refuses in speaker
+     mode at stage media. sitd still routes no call audio by default.
+   - **"Voice Call" UCM verb** (`ucm2/Google/cheetah/VoiceCall.conf`):
+     Earpiece (priority 100), Speaker (200, speakerphone at the stage's
+     levels) and Mic. The devices only `exec` `systemctl start
+     omamobile-speaker-mode@…` (synchronously, so the earpiece mode is in
+     force before the device counts as enabled); the verb sets TDM 0's
+     format and nothing else. It names no PCM and leaves the voice mixers
+     and PCMs 4 and 11 to sitd, which owns them for a call and restores
+     them. A WirePlumber rule disables PCM 4 and 11 nodes in any profile.
+     **Open:** whether PipeWire's ACP offers a verb without PCMs as a
+     profile with selectable ports, and so whether callaudiod can drive it
+     (TELEPHONY-APPS-PLAN 2.3, still [I]); until then the verb works with
+     `alsaucm` and the mode units by hand. HiFi must stay the active
+     profile: R1 checks it.
+   - Not built: the proximity (acoustic-shock) mute, a speakerphone mode
+     with stock's FIR delta, callaudiod integration.
+
+   **C9i session runbooks.** Rules for every sound step (C9 and C9h):
+   the phone screen up on a table, the listener at about 40 cm, told
+   before each sound what it will be; `omamobile-speaker-protection
+   monitor 600 2` in a second terminal; the watchdog active; never a
+   register read past 0x10100. **Rollback for every step**, unless the
+   step says otherwise: `tools/phone-ssh 'omamobile-speaker-protection
+   mute'`, then the saved `/etc/omamobile/speaker.conf` (or `lvl 737 10
+   media`) and `systemctl restart omamobile-speaker-protection`; for
+   filter steps `eq reset` (C9h).
+   ```sh
+   lvl() { tools/phone-ssh "printf 'OMAMOBILE_SPK_STAGE=${3:-media}\nOMAMOBILE_SPK_DIGITAL=$1\nOMAMOBILE_SPK_ANALOG=$2\nOMAMOBILE_SPK_TEMP_JUMP=5\nOMAMOBILE_WATCH_INTERVAL=0.5\n' > /etc/omamobile/speaker.conf; systemctl restart omamobile-speaker-protection; sleep 3; omamobile-speaker-protection status | head -1"; }
+   tb() { tools/phone-ssh "F=$1 S=${2:-5} VOL=1.0 RISE=5 IMP=${IMP:-0} FB=${FB:-0} bash -s" < tools/speaker-trip-burst | tee -a logs/c9i.log; }
+   ```
+   Unlike C9d-7/8's `lvl`, this one defaults to stage media. It
+   overwrites `speaker.conf`, so R0 saves a copy first. Session 3 is the
+   stock capture, C9j below, and only if session 2 finds no lead.
+
+   *Session 1: state, then the filter at 737/10 (risk low).*
+   | Step | What | Risk | Expect / Pass | Stop | Rollback |
+   | --- | --- | --- | --- | --- | --- |
+   | R0 | **Read-only, any installed version, no sound:** `tools/phone-ssh 'uname -r; pacman -Q omamobile-audio omamobile-speaker-tuning omamobile-device-cheetah pipewire wireplumber swh-plugins; omamobile-speaker-protection status \| head -3; systemctl is-active omamobile-speaker-protection omamobile-speaker-watch; cat /var/lib/omamobile/speaker-protection-verified; cat /sys/module/aoc_alsa_dev/parameters/speaker_protection; ls /etc/modprobe.d; grep -v "^#" /etc/omamobile/speaker.conf; omamobile-speaker-protection feedback status'`; save a copy: `tools/phone-ssh 'cp -a /etc/omamobile/speaker.conf /etc/omamobile/speaker.conf.c9i-r0'` | none | everything recorded here (versions, the stage line, the stamp's date and kernel); "ok: stage media … Top 737/10, Bottom 737/10"; both units `active` | the stage isn't media, or the watchdog inactive: restore the default `speaker.conf` (C9d-3 step 0) and restart the service before anything else; pipewire older than 1.4: no 0.6.0 (the filter needs `abs`) | none needed |
+   | R1 | **Install 0.6.0** (announce: the speakers go silent for a few seconds while the service restarts; the sound may change if the phone ran 0.3.5): `tools/phone-install-package packages/omamobile-audio`, then `tools/phone-ssh 'systemctl daemon-reload; systemctl restart omamobile-speaker-protection; sleep 3; omamobile-speaker-protection report'`, and as the user `systemctl --user restart pipewire pipewire-pulse wireplumber` (C9h A1's `$U`), then `as_user pactl list cards \| grep -E "Active Profile\|Profile"` | low | the report: stage media, 737/10, mode speaker, "stage c9 allowed by the stamp: no (needs verify --at-level); c9-probe yes" (or "stamp: none"); the card's active profile HiFi, a "Voice Call" profile at most listed | the service not "ok" (send the report and `journalctl -u omamobile-speaker-protection -b`); the active profile is Voice Call, or HiFi's speaker or mic node missing: delete the `SectionUseCase."Voice Call"` block from the installed `conf.d/aoc-snd-card/aoc-snd-card.conf` and restart the user's PipeWire, then report | reinstall the version R0 recorded from its commit (`git worktree add /tmp/oa <commit>; tools/phone-install-package /tmp/oa/packages/omamobile-audio`) |
+   | R2 | **C9h A2** (in the path, the PCM format) during a -23 dBFS tone; `omamobile-speaker-protection report` during the tone shows the speaker PCM's `hw_params` too | low | as C9h A2 | as C9h A2 | as C9h |
+   | R3 | **C9h B1-B4** (A/B by ear, measured with the phone's and the laptop's microphones, the suggestion applied) | low | as C9h; a preference recorded | as C9h | `eq reset` |
+   | R4 | **C9h C1-C5 and D1-D2** (bass management, harmonics, width, drive, full volume, orientation, `eq save`) | low | as C9h; the chosen values recorded here: they become the next package defaults | as C9h | `eq reset`; `systemctl --user disable --now omamobile-speaker-orient` |
+   | R5 | **The earpiece mode, read-only half:** `tools/phone-ssh 'omamobile-speaker-protection mode earpiece; omamobile-speaker-protection status \| head -4; sleep 5; journalctl -u omamobile-speaker-watch --since -1min \| tail -3; omamobile-speaker-protection mode speaker; omamobile-speaker-protection status \| head -1'` (no sound plays; announce nothing audible) | low | "mode earpiece: Top 657/6 with PCM Source ASP (DSP bypassed), Bottom muted", the watchdog silent, then "ok: stage media … 737/10" again | a watchdog mute (record its reason), "mode … refused" | `systemctl restart omamobile-speaker-protection` |
+   Record each step's result here with the date and `uname -r`.
+
+   *Session 2: why gain 17 runs away (risk medium; the human's separate
+   go, after session 1).* `tools/speaker-gain17-probe` runs G0-G4 in this
+   order and prints the table row; by hand the steps are C9d-7/8's, with
+   `lvl 817 17 c9-probe`. Between gain-17 bursts 60 s of rest; no burst at
+   gain 17 longer than 1 s until the C9i gate has passed at that level.
+   | Step | What | Risk | Expect / Pass | Stop | Rollback |
+   | --- | --- | --- | --- | --- | --- |
+   | G0 | **Read-only:** `omamobile-speaker-protection report`; the RTLOG count (`amixer -c<card> controls \| grep -c RTLOG`) | none | TX slots ok, hostless PCM 15 closed, 10 RTLOG controls, `speaker_protection: Y`, a stamp whose firmware matches | TX slots not ok (the overlay needs its own boot); no `speaker_protection=1` or no stamp: G1-G2 only | none |
+   | G1 | The feedback stream alone, no sound (C9d-7/8 step 1) | low | RUNNING, then not running; no AoC or cs35l41 error | an oops or AoC error: reboot (never `rmmod`) | `feedback stop` |
+   | G2 | 737/10 (stage media): `IMP=1 tb /tmp/t1k23.wav 3`, then `IMP=1 FB=1 tb /tmp/t1k23.wav 3` (C9d step 2) | low | CLEAN; Z/CAL_R 0.97-1.05 or "not measurable" (record which) | Z/CAL_R off by more than 10 % | as the rules |
+   | G3 | `lvl 817 17 c9-probe`, 60 s, `IMP=1 tb /tmp/t1k30.wav 1`, `lvl 737 10 media` (step 3) | medium | TRIPPED expected (C9d-5/6); Z/CAL_R or "not measurable" recorded | none: go on to G4 | `lvl 737 10 media` |
+   | G4 | The same with `FB=1` (step 4) | medium | CLEAN where G3 tripped: C9d-7 is the fix | TRIPPED again: no more listening steps at 17 this session | `feedback stop; lvl 737 10 media` |
+   | G5 | **Register snapshots** (the table's first row; read-only reads, each during a burst): at 737/10 run `tb /tmp/t1k30.wav 3` in one terminal and, as it starts, `tools/phone-ssh 'MODE=snapshot LABEL=737-10 bash -s' < tools/aoc-amp-diag > logs/amp-regs-737-10.txt` in another; then `lvl 817 17 c9-probe`, 60 s, the same with `tb /tmp/t1k30.wav 1` and `LABEL=817-17`, `lvl 737 10 media`; on the laptop `tools/aoc-amp-diag diff logs/amp-regs-737-10.txt logs/amp-regs-817-17.txt` | low-medium | "a playback PCM running: yes" in both headers; the registers that differ besides AMP_GAIN_CTRL (quote only those lines here) | "no cs35l41 regmap"; a header without a running PCM (the snapshot missed the burst: repeat once at 737/10 only). If the 817/17 burst tripped before the read, `AMP_DIG_VOL_CTRL` reads muted: say so, don't repeat at 17 | `lvl 737 10 media` |
+   | G6 | **The gate's baseline at the everyday level:** start `omamobile-speaker-protection verify --at-level 737 10 --room <the room's °C>` in one terminal, then within 15 s `tb /tmp/mt20.wav 5` (make it with `signal multitone /tmp/mt20.wav --level -20 --seconds 5`) | low | expected **not verified** with "vmon low 1" (gain 10 never sensed, C9d-2); record its lines. If it passes, its stamp allows c9 up to 737/10 only, which is the media level | anything but a clean refusal or pass (an error, a mute) | none (a refusal writes no stamp) |
+
+   *Session 4 (after a fix, from C9d-3 step 4 on):* `lvl 817 17 c9-probe`;
+   `verify --at-level 817 17 --room <°C>` during `tb /tmp/mt20.wav 5`
+   must pass on both amplifiers; then the same with `/tmp/mt10.wav`
+   (tenths of a degree, as C9d step 2's 0.43 °C). Only then `lvl 817 17
+   c9`, C9d-3 step 4, C9e and C9f, and a package version that makes c9 the
+   default. Stop on the C9 rules, `vmon low 1` at 17, or any refusal.
+
+   **C9j: stock capture runbook (plan only; one attended slot A session,
+   the human's go; only if session 2 gives no lead).** It answers
+   directly: does stock read `vmon low` 0 at gain 17, what Z/CAL_R does
+   stock see, and which amplifier register differs from ours. [I] marks
+   what hasn't been checked on stock with these tools.
+   | Step | What | Risk | Expect / Pass | Stop | Rollback |
+   | --- | --- | --- | --- | --- | --- |
+   | S0 | **Backups first** (AGENTS.md): the M0.1 checksum check of `efs`, `efs_backup`, `modem_userdata`, `persist`, `modem_a/b` against the off-repo backup (MODEM-PLAN M0.1) | none | all match | no backup or a mismatch: stop, no slot A boot | none |
+   | S1 | Make the test files on the laptop: `python3 -I packages/omamobile-audio/lib/speaker_dsp.py signal tone logs/t1k20.wav --level -20 --seconds 10` (and -30, -40) | none | three WAVs | | |
+   | S2 | **Boot stock:** `reboot-to bootloader`, `fastboot --set-active=a`, `fastboot reboot` (CONTRIBUTING.md) | medium (stock rewrites `efs`, `persist`, `modem_userdata`) | Android boots; `adb shell su -c id` is root [I: the root used for `bin/omamobile capture`] | anything unexpected in the boot: stop, return (S7) | S7 |
+   | S3 | **Read-only identification:** `adb push tools/aoc-amp-diag /data/local/tmp/`; `adb shell su -c 'for d in /sys/kernel/debug/regmap/*; do echo "$d $(cat $d/name)"; done'`; `adb shell su -c 'tinymix -D 0 controls' \| grep -E 'CSPL_TEMPERATURE\|VMON_LOW\|CAL_R_SELECTED\|RTLOG_DATA\|PCM Gain\|PCM Volume'` (names only: never `tinymix` without arguments, which reads every control, AoC ones included) [I: stock tinymix's `controls`] | none | two cs35l41 regmaps; the control names | none of either: record, go to S7 | |
+   | S4 | **Stock at its own media level:** `adb push logs/t1k20.wav /sdcard/Download/`, media volume to maximum (`adb shell cmd media_session volume --stream 3 --set 15` [I]), open the file in stock's player (announce: a 10 s tone at stock's full media level); 2 s in: `adb shell su -c 'MODE=snapshot LABEL=stock-20 WAIT=0 DELAY=0 sh /data/local/tmp/aoc-amp-diag' > logs/amp-regs-stock-20.txt`, then single reads of the protection controls by their exact names (`tinymix -D 0 '<name>'`): `CSPL_TEMPERATURE` (Q14), `BDLOG_VMON_LOW_FLAG`, `CAL_R_SELECTED` against `CAL_R` printed as equal or not, and RTLOG_DATA word 1 divided by CAL_R **computed on the phone and printed as a ratio only** (stock's HAL samples the logger at every stream; we only read, never arm it) | medium (stock's own level, its own protection) | `vmon low` and Z/CAL_R at gain 17 under stock; a snapshot whose AMP_GAIN_CTRL reads gain 17 | a warm phone, distortion, any error dialog: stop the player | stop the player |
+   | S5 | S4 at -30 and -40 dBFS | medium | the same lines | as S4 | |
+   | S6 | Optional (the human's call: the grey area of copying stock's curve): stock's acoustic response with the laptop's microphone (C9h `lrec` with stock's player) | low | | | |
+   | S7 | **Leave nothing, return:** `adb shell su -c 'rm /data/local/tmp/aoc-amp-diag'`, `adb shell rm /sdcard/Download/t1k*.wav`; `adb reboot bootloader`, `fastboot --set-active=b`, `fastboot reboot` | low | slot B boots | slot B doesn't come up: AGENTS.md's stuck-reboot rules | |
+   | S8 | **A fresh read-only NV backup** (AGENTS.md: stock's modem stack wrote `efs`, `persist`, `modem_userdata`), and record its checksums as the new M0.1 reference | none | | | |
+   | S9 | On the laptop: `tools/aoc-amp-diag diff logs/amp-regs-817-17.txt logs/amp-regs-stock-20.txt` (and against 737-10) | none | the registers that differ from stock at gain 17: the lead for the fix; quote only those lines | | |
 
    **Microphones:** stock records with 22 dB soft gain (`handset-mic-post`),
    and so do we. Speech close to the phone peaked near 15000 (about -7 dBFS)
